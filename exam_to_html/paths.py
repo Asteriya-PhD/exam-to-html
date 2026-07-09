@@ -101,6 +101,30 @@ def gui_static_dir() -> Path:
     return Path(__file__).parent / "gui" / "static"
 
 
+def courseware_images_dir() -> Path:
+    """topic_garden courseware/images 目录 — 试卷 PDF 解析后图片存这里.
+
+    模板里 <img src="images/X.jpg"> 是相对路径, 必须在输出 HTML 同级
+    才能解析。pipeline 会把这个目录链接到 output_dir/images。
+    """
+    # 1. frozen 模式: 依赖 pyinstaller.spec 把 courseware/images 打进包
+    if getattr(sys, "frozen", False):
+        meipass = Path(getattr(sys, "_MEIPASS", ""))
+        candidate = meipass / "courseware" / "images"
+        if candidate.is_dir():
+            return candidate
+    # 2. dev 模式: topic_garden 可能以 editable install 装在我们的 .venv 里
+    import importlib.util
+    spec = importlib.util.find_spec("topic_garden")
+    if spec and spec.submodule_search_locations:
+        src_dir = Path(spec.submodule_search_locations[0])
+        for ancestor in [src_dir.parent.parent.parent, src_dir.parent.parent, src_dir.parent]:
+            candidate = ancestor / "courseware" / "images"
+            if candidate.is_dir():
+                return candidate
+    return Path("courseware") / "images"
+
+
 def ensure_data_dirs() -> None:
     """启动时确保所有数据目录存在."""
     for d in (inbox_dir(), archive_dir(), logs_dir()):

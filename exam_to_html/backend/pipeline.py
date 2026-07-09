@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import sys
 import tempfile
 import time
 import uuid
@@ -37,7 +38,7 @@ from ..errors import (
     OutputPermissionError,
     PipelineError,
 )
-from ..paths import archive_dir, db_path
+from ..paths import archive_dir, courseware_images_dir, db_path
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +49,49 @@ MIN_DISK_SPACE_BYTES = 200 * 1024 * 1024  # 200MB
 # DB 锁重试
 DB_LOCK_RETRY_TIMES = 3
 DB_LOCK_RETRY_INTERVAL_SEC = 0.1
+
+
+# ============================================================
+# images/ 目录链接 — 模板里 <img src="images/X.jpg"> 需同级
+# ============================================================
+def _ensure_images_link(output_dir: Path) -> Path:
+    """确保 output_dir/images 存在并指向 topic_garden 的 courseware/images.
+
+    优先用 symlink (避免复制 3000+ 张图), Windows 走 junction.
+    若 symlink 不支持 (Windows 非管理员), 退化为 copy_tree.
+
+    Returns:
+        output_dir/images 路径 (新创建或已存在)
+    """
+    target = output_dir / "images"
+    if target.is_dir() and not target.is_symlink():
+        return target
+    if target.is_symlink():
+        try:
+            target.resolve(strict=False)
+            return target
+        except (OSError, RuntimeError):
+            target.unlink()
+
+    src = courseware_images_dir()
+    if not src.is_dir():
+        log.warning("[pipeline] courseware/images 不存在: %s — 试卷图将无法显示", src)
+        return target
+
+    try:
+        if sys.platform != "win32":
+            target.symlink_to(src.resolve(), target_is_directory=True)
+        else:
+            try:
+                import _winapi  # type: ignore
+                _winapi.CreateJunction(str(src.resolve()), str(target))
+            except (ImportError, OSError):
+                shutil.copytree(src, target)
+    except OSError as e:
+        log.warning("[pipeline] 创建 images 链接失败 (%s), 退化为复制", e)
+        if not target.exists():
+            shutil.copytree(src, target)
+    return target
 
 
 def _check_pdf_extension(pdf_path: Path) -> None:
@@ -247,14 +291,24 @@ def convert_pdf(
     if attached == 0:
         raise PipelineError(f"题目挂载全部失败 (Topic #{topic.id}, {len(questions)} 题)")
 
+    # 7. 组题 + 写 HTML (走 exam.html 单页式模板 + 我们的 CSS wrapper)
     from topic_garden.composer import TopicComposer
+    from .exam_renderer import render_exam_html
     output_path = output_dir / f"{stem}.html"
     composer = TopicComposer()
     try:
-        composer.compose_to_file(
-            topic_id=topic.id, output_path=str(output_path),
-            class_label=None, source="api",
-        )
+        compose_result = composer.compose(topic_id=topic.id)
+        from topic_garden.db import log_compose
+        full_html = render_exam_html(compose_result, title=stem)
+        output_path.write_text(full_html, encoding="utf-8")
+        _ensure_images_link(output_dir)
+        try:
+            log_compose(
+                topic_id=topic.id, html=full_html,
+                class_label=None, source="api",
+            )
+        except Exception as e:
+            log.warning("[pipeline] log_compose 跳过: %s", e)
     except Exception as e:
         log.exception("[pipeline] compose 失败")
         raise PipelineError(f"HTML 生成失败: {e}", cause=e) from e

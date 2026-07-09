@@ -1,0 +1,231 @@
+{# exam.html — 试卷讲评 body 模板 (仅 body 片段, 由 exam_renderer 包外层)
+   设计要点 (用户需求 + benchmark.html 改进):
+   1. 窄侧边导航栏 (题号列表 + 当前题高亮)
+   2. 每题一页, 键盘左右 / 触屏滑动 / 数字键跳转 翻页
+   3. 统一字体 (PingFang / YaHei), 选项 A/B/C/D 每项独占一行 + 背景色块
+   4. 卷头/页眉/页码/卷首语已由 md_to_html.py 过滤
+   5. 顶部进度 + 翻页按钮 + 字号缩放 + 打印
+#}
+{% set ns = namespace(qnum=0) %}
+{% for key, qs in (questions_by_k or {}).items() %}
+  {% for q in qs %}{% set ns.qnum = ns.qnum + 1 %}{% endfor %}
+{% endfor %}
+{% set total_q = ns.qnum %}
+
+<main class="main" id="main">
+  <header class="topbar">
+    <button class="topbar-btn topbar-toggle" id="toggle-sidebar" title="收起/展开侧边栏" aria-label="收起侧边栏">≡</button>
+    <button class="topbar-btn" id="prev-btn" title="上一题 (←)" aria-label="上一题">‹</button>
+    <div class="topbar-title" id="page-indicator">
+      <span id="page-current">1</span>
+      <span class="page-sep">/</span>
+      <span id="page-total">{{ total_q }}</span>
+    </div>
+    <button class="topbar-btn" id="next-btn" title="下一题 (→)" aria-label="下一题">›</button>
+    <div class="topbar-spacer"></div>
+    <div class="topbar-tools">
+      <button class="topbar-btn-icon" id="zoom-out" title="缩小字号" aria-label="缩小字号">A−</button>
+      <button class="topbar-btn-icon" id="zoom-reset" title="恢复默认字号" aria-label="恢复默认字号">A</button>
+      <button class="topbar-btn-icon" id="zoom-in" title="放大字号" aria-label="放大字号">A+</button>
+      <button class="topbar-btn-icon" id="print-btn" title="打印 / 导出 PDF" aria-label="打印">🖨</button>
+    </div>
+  </header>
+
+  <div class="stage" id="stage">
+    {% set ns2 = namespace(qnum=0) %}
+    {% for key, qs in (questions_by_k or {}).items() %}
+      {% for q in qs %}
+        {% set ns2.qnum = ns2.qnum + 1 %}
+        {% set n = ns2.qnum %}
+    <section class="question-page" id="q{{ n }}" data-qnum="{{ n }}"{% if n != 1 %} hidden{% endif %}>
+      <article class="question-card">
+        <header class="question-header">
+          <div class="question-title">
+            <span class="question-num">Q{{ n }}</span>
+            {% if q.q_type == 'choice' %}
+              {% if q.is_multi_select is true %}<span class="tag tag-multi">【多选】</span>
+              {% elif q.is_multi_select is false %}<span class="tag tag-single">【单选】</span>
+              {% else %}<span class="tag tag-warn" title="单/多选未识别">【?】</span>
+              {% endif %}
+            {% elif q.q_type == 'calculation' %}<span class="tag tag-calc">【解答】</span>
+            {% elif q.q_type == 'fill_blank' %}<span class="tag tag-fill">【填空】</span>
+            {% elif q.q_type == 'experiment' %}<span class="tag tag-exp">【实验】</span>
+            {% endif %}
+            {% if q.source_paper %}<span class="question-source">[{{ q.source_year or '' }} · {{ q.source_paper }}]</span>{% endif %}
+          </div>
+          <div class="question-meta">
+            <span class="page-tag">第 {{ n }} / {{ total_q }} 题</span>
+          </div>
+        </header>
+
+        <div class="question-body">
+          {{ q.content_md_html | safe }}
+        </div>
+
+        {% if q.figure_paths_extra %}
+        <div class="question-figures">
+          {% for fp in q.figure_paths_extra %}
+          <img src="images/{{ fp }}" alt="题图" loading="lazy" />
+          {% endfor %}
+        </div>
+        {% endif %}
+      </article>
+    </section>
+      {% endfor %}
+    {% endfor %}
+  </div>
+
+  <footer class="bottombar">
+    <button class="bottombar-btn" id="prev-btn-2" title="上一题 (←)">‹ 上一题</button>
+    <div class="progress" aria-hidden="true">
+      <div class="progress-bar" id="progress-bar"></div>
+    </div>
+    <button class="bottombar-btn" id="next-btn-2" title="下一题 (→)">下一题 ›</button>
+  </footer>
+</main>
+
+<nav class="sidebar-rail" id="sidebar-rail" aria-label="题号导航">
+  {% set ns3 = namespace(qnum=0) %}
+  {% for key, qs in (questions_by_k or {}).items() %}
+    {% for q in qs %}
+      {% set ns3.qnum = ns3.qnum + 1 %}
+      <a class="nav-item{% if ns3.qnum == 1 %} active{% endif %}"
+         href="#q{{ ns3.qnum }}"
+         data-qnum="{{ ns3.qnum }}"
+         title="第 {{ ns3.qnum }} 题">Q{{ ns3.qnum }}</a>
+    {% endfor %}
+  {% endfor %}
+</nav>
+
+<script>
+(function () {
+  "use strict";
+
+  const pages = Array.from(document.querySelectorAll(".question-page"));
+  const total = pages.length;
+  let current = 0;
+
+  const pageCurrent = document.getElementById("page-current");
+  const pageTotal = document.getElementById("page-total");
+  const progressBar = document.getElementById("progress-bar");
+  if (pageTotal) pageTotal.textContent = String(total);
+  function refreshChrome() {
+    if (pageCurrent) pageCurrent.textContent = String(current + 1);
+    if (progressBar) progressBar.style.width = (total <= 1 ? 100 : (current / (total - 1)) * 100) + "%";
+    document.querySelectorAll(".nav-item").forEach((el, i) => {
+      el.classList.toggle("active", i === current);
+    });
+  }
+
+  function show(idx) {
+    if (idx < 0 || idx >= total) return;
+    if (idx === current) return;
+    pages[current].hidden = true;
+    pages[idx].hidden = false;
+    current = idx;
+    refreshChrome();
+    const stage = document.getElementById("stage");
+    if (stage) stage.scrollTop = 0;
+    const navItem = document.querySelector('.nav-item[data-qnum="' + (idx + 1) + '"]');
+    if (navItem) navItem.scrollIntoView({ block: "nearest", inline: "center" });
+    if (history && history.replaceState) {
+      history.replaceState(null, "", "#q" + (idx + 1));
+    }
+  }
+  function next() { show(Math.min(current + 1, total - 1)); }
+  function prev() { show(Math.max(current - 1, 0)); }
+
+  document.getElementById("prev-btn").addEventListener("click", prev);
+  document.getElementById("next-btn").addEventListener("click", next);
+  document.getElementById("prev-btn-2").addEventListener("click", prev);
+  document.getElementById("next-btn-2").addEventListener("click", next);
+
+  document.querySelectorAll(".nav-item").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      e.preventDefault();
+      const n = parseInt(el.getAttribute("data-qnum"), 10);
+      if (!isNaN(n)) show(n - 1);
+    });
+  });
+
+  const sidebar = document.getElementById("sidebar-rail");
+  const toggleBtn = document.getElementById("toggle-sidebar");
+  toggleBtn.addEventListener("click", () => {
+    const collapsed = sidebar.classList.toggle("collapsed");
+    toggleBtn.classList.toggle("active", collapsed);
+    toggleBtn.title = collapsed ? "展开侧边栏" : "收起侧边栏";
+  });
+
+  document.addEventListener("keydown", (e) => {
+    const tag = (e.target && e.target.tagName) || "";
+    if (tag === "INPUT" || tag === "TEXTAREA" || (e.target && e.target.isContentEditable)) return;
+    if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") { e.preventDefault(); next(); }
+    else if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); prev(); }
+    else if (e.key === "Home") { e.preventDefault(); show(0); }
+    else if (e.key === "End") { e.preventDefault(); show(total - 1); }
+    else if (/^[0-9]$/.test(e.key)) {
+      const target = e.key === "0" ? 9 : (parseInt(e.key, 10) - 1);
+      if (target >= 0 && target < total) { e.preventDefault(); show(target); }
+    }
+  });
+
+  let touchStartX = 0, touchStartY = 0, touchStartT = 0;
+  const SWIPE_MIN_DIST = 50;
+  const SWIPE_MAX_OFFY = 80;
+  const SWIPE_MAX_TIME = 600;
+  document.addEventListener("touchstart", (e) => {
+    if (!e.touches || !e.touches[0]) return;
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+    touchStartT = Date.now();
+  }, { passive: true });
+  document.addEventListener("touchend", (e) => {
+    if (!e.changedTouches || !e.changedTouches[0]) return;
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    const dy = e.changedTouches[0].clientY - touchStartY;
+    const dt = Date.now() - touchStartT;
+    if (dt > SWIPE_MAX_TIME) return;
+    if (Math.abs(dx) < SWIPE_MIN_DIST) return;
+    if (Math.abs(dy) > SWIPE_MAX_OFFY) return;
+    if (dx < 0) next(); else prev();
+  }, { passive: true });
+
+  const ZOOM_KEY = "exam-to-html:zoom";
+  const ZOOM_STEPS = [0.85, 0.95, 1.0, 1.1, 1.25, 1.4];
+  function applyZoom(z) { document.documentElement.style.setProperty("--zoom", String(z)); }
+  let zoomIdx = 2;
+  try {
+    const saved = parseFloat(localStorage.getItem(ZOOM_KEY));
+    if (!isNaN(saved)) {
+      const i = ZOOM_STEPS.indexOf(saved);
+      if (i >= 0) zoomIdx = i;
+    }
+  } catch (e) {}
+  applyZoom(ZOOM_STEPS[zoomIdx]);
+  function setZoom(delta) {
+    zoomIdx = Math.max(0, Math.min(ZOOM_STEPS.length - 1, zoomIdx + delta));
+    applyZoom(ZOOM_STEPS[zoomIdx]);
+    try { localStorage.setItem(ZOOM_KEY, String(ZOOM_STEPS[zoomIdx])); } catch (e) {}
+  }
+  document.getElementById("zoom-in").addEventListener("click", () => setZoom(+1));
+  document.getElementById("zoom-out").addEventListener("click", () => setZoom(-1));
+  document.getElementById("zoom-reset").addEventListener("click", () => {
+    zoomIdx = 2;
+    applyZoom(ZOOM_STEPS[zoomIdx]);
+    try { localStorage.setItem(ZOOM_KEY, String(ZOOM_STEPS[zoomIdx])); } catch (e) {}
+  });
+
+  document.getElementById("print-btn").addEventListener("click", () => window.print());
+
+  function initFromHash() {
+    const m = (location.hash || "").match(/^#q(\d+)$/);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (n >= 1 && n <= total) { show(n - 1); return; }
+    }
+    refreshChrome();
+  }
+  initFromHash();
+  window.addEventListener("hashchange", initFromHash);
+})();
+</script>
