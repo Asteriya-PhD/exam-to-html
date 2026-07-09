@@ -4,7 +4,8 @@
 
 **目标用户**：懂物理不懂代码的高中物理教师。
 **形态**：Windows 单文件 .exe（macOS 顺带）。
-**当前进度**：🔨 设计阶段（M0）
+**当前进度**：🔨 M1 骨架完工 + CI 自动 build（Win/Mac）
+[![Build](https://github.com/yourname/exam-to-html/actions/workflows/build.yml/badge.svg)](https://github.com/yourname/exam-to-html/actions/workflows/build.yml)
 
 ---
 
@@ -45,18 +46,26 @@ HTML 课件包含：
 ## 开发
 
 ```bash
-# 在仓根目录
-python -m venv .venv
-source .venv/bin/activate  # 或 .venv\Scripts\activate (Win)
+# 方式 A (推荐): 复用 topic_garden_app/.venv
+# topic_garden 的 venv 已经装齐 PDF2PPT 全套依赖 (PyMuPDF / python-pptx /
+# mineru-open-sdk / zhipuai / rapidocr), 真 PDF 解析可直接跑。
+source ../topic_garden_app/.venv/bin/activate     # Mac/Linux
+# 或: ..\topic_garden_app\.venv\Scripts\Activate.ps1   # Win
 
-pip install -e ../topic_garden_app  # 引用老仓（本地开发）
-pip install -e ".[dev]"
+pip install -e .[dev]                            # 只装 exam-to-html 自身
 
-# 本地启动（开发模式）
-python -m exam_to_html
+python -m exam_to_html                           # 启动 GUI
 
 # 打包 Windows .exe
 pyinstaller pyinstaller.spec
+
+# ---
+# 方式 B: 全新独立 venv (需另外装 PDF2PPT 依赖)
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ../topic_garden_app
+pip install -e ".[dev]"
+pip install -r ../PDF2PPT/requirements.txt       # 仅方式 B 需要
 ```
 
 详见 [`docs/distribution-design.md`](docs/distribution-design.md) 第 9 节里程碑。
@@ -69,6 +78,14 @@ pyinstaller pyinstaller.spec
 2. **不主动推销 token** —— flash 模式开箱即用，token 是奖励性升级
 3. **100% 本地处理** —— PDF 不上传到任何第三方服务（除了 MinerU API 调用时）
 4. **完美主义优先于上线时间** —— 3-5 个种子教师用好，比 100 个教师凑合用更重要
+
+## 自动更新（设计文档 §7）
+
+教师电脑装好后会自动检查更新（24h 节流），高级设置里"📦 检查更新"按钮可手动强制检查。
+
+- **version.json 部署在哪**: GitHub Pages，自动 push。`git tag v0.1.0 && git push origin v0.1.0` 触发 workflow deploy 到 `gh-pages` 分支，URL: `https://<user>.github.io/exam-to-html/version.json`
+- **教师不会自动下载/安装** —— 只在高级设置里提示"🆕 新版本可用"，由教师主动点"前往下载"
+- **首次配置**: 见 [`docs/build-windows.md`](docs/build-windows.md) §A — push 仓到 GH 后 workflow 自动跑
 
 ---
 

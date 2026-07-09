@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Exam to HTML</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <h1>Exam to HTML</h1>
+    <p class="subtitle">试卷 PDF → 讲评课件</p>
+  </header>
+
+  <main>
+    <!-- 启动 banner: 上次未完成 PDF (M3-2) -->
+    <div id="incomplete-banner" class="banner hidden" role="alert">
+      <div class="banner-text">
+        <strong>上次有未完成的 PDF</strong>
+        <span id="incomplete-detail"></span>
+      </div>
+      <button id="dismiss-banner" class="btn-link">忽略</button>
+    </div>
+
+    <!-- 拖拽区 -->
+    <div id="dropzone" class="dropzone">
+      <div class="dz-inner">
+        <div class="dz-icon">📄</div>
+        <p class="dz-title">拖 PDF 试卷到这里</p>
+        <p class="dz-sub">或 <a href="#" id="pick-link">点击选择文件</a></p>
+        <p class="dz-filename" id="picked-name"></p>
+      </div>
+      <input type="file" id="filepicker" accept=".pdf,application/pdf" hidden>
+    </div>
+
+    <!-- 输出位置 -->
+    <div class="row output-row">
+      <label>输出位置:</label>
+      <span id="output-dir" class="output-dir">桌面</span>
+    </div>
+
+    <!-- 高级设置 (折叠) -->
+    <details id="advanced">
+      <summary>高级设置</summary>
+      <div class="adv-body">
+        <label class="field">
+          <span>MinerU API Token (可选)</span>
+          <input type="password" id="token" placeholder="不填也能用" autocomplete="off">
+        </label>
+        <p class="hint">
+          💡 不填也能用。<br>
+          填了之后能识别题目类型（单选/多选/解答）。
+        </p>
+        <button id="save-token" class="btn-secondary">保存设置</button>
+
+        <!-- 自动更新 -->
+        <div class="updater-row">
+          <button id="check-update" class="btn-secondary">📦 检查更新</button>
+          <span id="update-status" class="update-status"></span>
+        </div>
+      </div>
+    </details>
+
+    <!-- 操作 -->
+    <button id="start" class="btn-primary" disabled>开始转换</button>
+
+    <!-- 状态 -->
+    <div id="status" class="status hidden" role="status" aria-live="polite"></div>
+
+    <!-- 结果 -->
+    <div id="result" class="result hidden">
+      <p>✅ HTML 已保存到 <code id="result-path"></code></p>
+      <button id="open-btn" class="btn-secondary">在浏览器打开</button>
+    </div>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "exam-to-html"
+version = "0.1.0"
+description = "试卷 PDF → HTML 讲评课件生成器 · 高中物理教师桌面工具"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "Zhewen Liu", email = "zhewenliu@example.com" },
+]
+keywords = ["courseware", "physics", "education", "exam", "pdf-to-html"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Education",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Topic :: Education",
+]
+
+# topic-garden 是兄弟仓, 装在 ../topic_garden_app/. dev 模式按 README 步骤:
+#     pip install -e ../topic_garden_app
+# 然后再 `pip install -e .` 或 `pip install -e ".[dev]"`。
+# PyInstaller frozen 模式: 打包前确保 topic-garden 已装进同一 venv。
+dependencies = [
+    "topic-garden>=0.18,<0.19",
+    "pywebview>=4.4",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "python-multipart>=0.0.9",        # FastAPI multipart/form-data 必需
+    "requests>=2.31",                 # 检查更新 / MinerU API 调用
+]
+
+# precision 模式（带【单选】【多选】徽章）需要 MinerU SDK。
+# flash 模式（默认）不需要, 教师开箱即用。
+[project.optional-dependencies]
+precision = [
+    "mineru-open-sdk>=0.2.5",
+]
+dev = [
+    "pytest>=7.0",
+]
+
+[project.scripts]
+exam-to-html = "exam_to_html.__main__:main"
+
+[project.urls]
+"Homepage" = "https://github.com/yourname/exam-to-html"
+"topic-garden" = "https://github.com/yourname/topic_garden_app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["exam_to_html*"]
+
+[tool.setuptools.package-data]
+"exam_to_html.gui" = ["static/*.html", "static/*.css", "static/*.js"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

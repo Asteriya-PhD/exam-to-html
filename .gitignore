@@ -39,3 +39,11 @@ config.local.json
 
 # OS
 .DS_Store
+
+# OMC + 临时
+.omc/
+config.json
+benchmark.html
+assets/
+*.bak
+*.tmp
