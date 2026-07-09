@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# PyInstaller
+build/
+dist/
+*.spec.bak
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# 测试输出
+tests/output/
+tests/.tmp/
+htmlcov/
+.coverage
+
+# 运行时（不要入库）
+logs/
+*.log
+*.sqlite3
+*.db
+config.local.json
+
+# OS
+.DS_Store
