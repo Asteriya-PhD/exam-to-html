@@ -23,10 +23,10 @@ def create_window(runner: "UvicornRunner", title: str = "Exam to HTML"):
     return webview.create_window(
         title=title,
         url=runner.url,
-        width=560,
-        height=680,
+        width=1080,
+        height=720,
         resizable=True,
-        min_size=(480, 600),
+        min_size=(960, 640),
         text_select=True,
         # confirm_close=False 让 X 直接关 (避免教师每次点确认)
         confirm_close=False,

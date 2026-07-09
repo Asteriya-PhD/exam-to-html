@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>03 One Desk · Exam to HTML</title>
+  <style>
+    :root {
+      --desk: #fafaf7;
+      --surface: #ffffff;
+      --ink: #1f1b16;
+      --muted: #6b6660;
+      --line: #e8e4dc;
+      --line-dark: #d8d0c4;
+      --blue: #2563eb;
+      --blue-soft: #eff4fe;
+      --green: #10b981;
+      --green-soft: #e8f8f1;
+      --red: #dc2626;
+      --shadow: 0 1px 2px rgba(31,27,22,0.04), 0 4px 14px rgba(31,27,22,0.04);
+      --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(135deg, rgba(37,99,235,0.045) 0 25%, transparent 25% 50%, rgba(16,185,129,0.035) 50% 75%, transparent 75%) 0 0 / 34px 34px,
+        var(--desk);
+      font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    button, input { font: inherit; }
+    .back { position: fixed; left: 18px; top: 16px; z-index: 10; color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 700; background: rgba(255,255,255,0.82); border: 1px solid var(--line); border-radius: 999px; padding: 8px 12px; }
+
+    .shell { width: min(1180px, calc(100vw - 44px)); min-height: calc(100vh - 44px); margin: 22px auto; display: grid; grid-template-rows: 62px 1fr; border: 1px solid var(--line); border-radius: 28px; background: rgba(250,250,247,0.92); box-shadow: 0 18px 58px rgba(31,27,22,0.08); overflow: hidden; }
+    .titlebar { display: flex; align-items: center; justify-content: space-between; padding: 0 28px 0 128px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.62); }
+    .brand { display: flex; align-items: baseline; gap: 10px; }
+    .brand strong { font-size: 18px; letter-spacing: -0.03em; }
+    .brand span { color: var(--muted); font: 12px var(--mono); }
+    .top-right { display: flex; align-items: center; gap: 18px; color: var(--muted); font-size: 13px; }
+    .gear { width: 38px; height: 38px; border: 1px solid var(--line); border-radius: 12px; background: #fff; color: var(--muted); cursor: pointer; }
+
+    .grid { padding: 24px; display: grid; grid-template-columns: minmax(0, 1.85fr) minmax(300px, 0.95fr); grid-template-rows: minmax(360px, 1fr) 220px; gap: 22px; }
+    .card { border: 1px solid var(--line); border-radius: 22px; background: rgba(255,255,255,0.88); box-shadow: var(--shadow); overflow: hidden; }
+    .drop-card { display: grid; grid-template-rows: auto 1fr auto; }
+    .card-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px; border-bottom: 1px solid var(--line); }
+    .kicker { color: var(--muted); font-size: 12px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
+    .card-head strong { font-size: 16px; letter-spacing: -0.02em; }
+    .pill { padding: 5px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: #fbfaf7; font: 12px var(--mono); }
+
+    .drop-area { margin: 22px; display: grid; place-items: center; border: 2px dashed var(--blue); border-radius: 20px; background: var(--blue-soft); text-align: center; transition: 150ms ease; }
+    .drop-area:hover { transform: translateY(-1px); }
+    .stack-icon { width: 94px; height: 72px; margin: 0 auto 20px; position: relative; }
+    .paper { position: absolute; width: 62px; height: 72px; border: 1px solid var(--line-dark); border-radius: 10px; background: white; box-shadow: 0 8px 18px rgba(31,27,22,0.08); }
+    .paper:nth-child(1) { left: 8px; top: 8px; transform: rotate(-8deg); }
+    .paper:nth-child(2) { left: 24px; top: 2px; transform: rotate(4deg); }
+    .paper:nth-child(3) { left: 16px; top: 0; }
+    .paper::after { content: ""; position: absolute; left: 12px; right: 12px; top: 22px; height: 2px; background: #cbd5e1; box-shadow: 0 10px 0 #e2e8f0, 0 20px 0 #e2e8f0; }
+    .drop-area h1 { margin: 0; font-size: clamp(30px, 4vw, 48px); letter-spacing: -0.065em; line-height: 1; }
+    .drop-area p { margin: 12px 0 0; color: var(--muted); }
+    .choose { color: var(--blue); font-weight: 800; text-decoration: none; }
+
+    .drop-footer { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: center; padding: 18px 20px; border-top: 1px solid var(--line); }
+    .output { min-width: 0; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+    .output b { color: var(--ink); }
+    .output code { font-family: var(--mono); }
+    .primary { height: 46px; padding: 0 18px; border: 0; border-radius: 12px; color: #fff; background: var(--blue); font-weight: 850; cursor: pointer; box-shadow: 0 10px 22px rgba(37,99,235,0.22); }
+
+    .queue { display: flex; flex-direction: column; }
+    .queue-body { padding: 18px; display: grid; gap: 14px; }
+    .stat { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 13px 14px; border: 1px solid var(--line); border-radius: 15px; background: #fbfaf7; }
+    .stat span { color: var(--muted); font-size: 13px; }
+    .stat b { font-size: 28px; letter-spacing: -0.045em; }
+    .stat.active { border-color: #bfdbfe; background: #f5f9ff; }
+    .stat.done { border-color: #bbf7d0; background: var(--green-soft); }
+    .recent { margin-top: 2px; display: grid; gap: 10px; }
+    .file-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 11px 12px; border: 1px solid var(--line); border-radius: 13px; background: white; }
+    .file-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+    .file-row small { display: block; margin-top: 3px; color: var(--muted); font: 11px var(--mono); }
+    .file-row button { height: 32px; border: 1px solid var(--line-dark); border-radius: 9px; background: #fff; font-size: 12px; font-weight: 800; cursor: pointer; }
+
+    .log-card { grid-column: 1 / -1; display: grid; grid-template-rows: 52px 1fr; }
+    .log-body { padding: 16px 20px; display: grid; gap: 9px; overflow: hidden; }
+    .log-line { display: grid; grid-template-columns: 78px minmax(160px, 1fr) auto; gap: 12px; align-items: center; color: var(--muted); font: 12px var(--mono); }
+    .log-line b { color: var(--ink); font-family: "IBM Plex Sans", sans-serif; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .log-line.now { color: var(--blue); font-weight: 800; }
+    .log-line.done { color: #047857; }
+
+    .settings-panel { position: fixed; right: 26px; top: 86px; width: 340px; padding: 18px; border: 1px solid var(--line); border-radius: 20px; background: rgba(255,255,255,0.94); box-shadow: 0 22px 54px rgba(31,27,22,0.12); }
+    .settings-panel h2 { margin: 0 0 14px; font-size: 18px; letter-spacing: -0.03em; }
+    .field { margin-bottom: 14px; }
+    .field label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 12px; font-weight: 700; }
+    .field input { width: 100%; height: 40px; border: 1px solid var(--line-dark); border-radius: 10px; padding: 0 12px; }
+    .field p { margin: 7px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .check { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 13px; }
+
+    button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid rgba(37, 99, 235, 0.25); outline-offset: 2px; }
+
+    @media (max-width: 960px) {
+      .shell { margin: 16px; width: calc(100vw - 32px); }
+      .titlebar { padding-left: 118px; }
+      .grid { grid-template-columns: 1fr; grid-template-rows: auto auto auto; }
+      .log-card { grid-column: auto; }
+      .settings-panel { position: static; width: auto; margin: 0 24px 24px; }
+    }
+  </style>
+</head>
+<body>
+  <a class="back" href="index.html">← 方案列表</a>
+  <div class="shell">
+    <header class="titlebar">
+      <div class="brand"><strong>exam-to-html</strong><span>一张课桌</span></div>
+      <div class="top-right"><span>v0.3.0</span><span>默认：桌面</span><button class="gear" aria-label="设置">⚙</button></div>
+    </header>
+
+    <main class="grid">
+      <section class="card drop-card" aria-label="拖放和转换">
+        <div class="card-head"><div><div class="kicker">Card 1 · Drop</div><strong>把试卷放到这里</strong></div><span class="pill">PDF → HTML</span></div>
+        <div class="drop-area">
+          <div>
+            <div class="stack-icon" aria-hidden="true"><span class="paper"></span><span class="paper"></span><span class="paper"></span></div>
+            <h1>把 PDF 拖到这里</h1>
+            <p>或 <a href="#" class="choose">点击选择文件</a>，转换后会自动打开 HTML</p>
+          </div>
+        </div>
+        <div class="drop-footer"><div class="output"><span>输出位置</span><b><code>C:\Users\李老师\Desktop</code></b></div><button class="primary">开始转换</button></div>
+      </section>
+
+      <aside class="card queue" aria-label="队列和结果">
+        <div class="card-head"><div><div class="kicker">Card 2 · Queue</div><strong>当前状态</strong></div><span class="pill">可排队</span></div>
+        <div class="queue-body">
+          <div class="stat"><span>待处理</span><b>0</b></div>
+          <div class="stat active"><span>进行中</span><b>1</b></div>
+          <div class="stat done"><span>已完成</span><b>12</b></div>
+          <div class="recent">
+            <div class="file-row"><div><strong>高一期中物理试卷.html</strong><small>刚刚 · 已打开浏览器</small></div><button>打开</button></div>
+            <div class="file-row"><div><strong>...第三次模拟.html</strong><small>昨天 · 保存到桌面</small></div><button>打开</button></div>
+          </div>
+        </div>
+      </aside>
+
+      <section class="card log-card" aria-label="最近进度">
+        <div class="card-head"><div><div class="kicker">Card 3 · Progress log</div><strong>最近活动</strong></div><span class="pill">自动滚动</span></div>
+        <div class="log-body">
+          <div class="log-line done"><span>14:31:42</span><b>物理_月考.pdf</b><span>已完成 → 桌面</span></div>
+          <div class="log-line"><span>14:32:01</span><b>高一期中物理试卷.pdf</b><span>PDF 已加载</span></div>
+          <div class="log-line"><span>14:32:09</span><b>高一期中物理试卷.pdf</b><span>正在解析第 4 / 12 题</span></div>
+          <div class="log-line now"><span>14:32:28</span><b>高一期中物理试卷.pdf</b><span>正在生成讲评 HTML</span></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <aside class="settings-panel" aria-label="设置示例">
+    <h2>设置</h2>
+    <div class="field"><label>MinerU API Token（可选）</label><input type="password" placeholder="可选 · 大多数情况无需填写"><p>不填也能用；填了之后能识别题目类型。</p></div>
+    <label class="check"><input type="checkbox" checked> 转换完成后自动打开 HTML</label>
+  </aside>
+</body>
+</html>

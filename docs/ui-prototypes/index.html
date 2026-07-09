@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Exam to HTML · M2 UI Prototypes</title>
+  <style>
+    :root {
+      --bg: #f5f6f8;
+      --surface: #ffffff;
+      --ink: #151922;
+      --muted: #687083;
+      --line: #e3e7ef;
+      --blue: #2563eb;
+      --blue-soft: #eef4ff;
+      --green: #10b981;
+      --warm: #b8543a;
+      --paper: #fbf7ef;
+      --shadow: 0 14px 34px rgba(19, 30, 49, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { min-height: 100%; }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(37, 99, 235, 0.10), transparent 32rem),
+        linear-gradient(180deg, #fbfcff 0%, var(--bg) 58%, #eff2f7 100%);
+    }
+
+    .page {
+      width: min(1180px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 48px 0 56px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 28px;
+      align-items: end;
+      margin-bottom: 28px;
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(32px, 4vw, 54px);
+      letter-spacing: -0.055em;
+      line-height: 0.98;
+    }
+
+    .hero p {
+      max-width: 760px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.72;
+    }
+
+    .meta-card {
+      min-width: 280px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.72);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(16px);
+    }
+
+    .meta-card strong { display: block; margin-bottom: 8px; }
+    .meta-card span { display: block; color: var(--muted); font-size: 13px; line-height: 1.65; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 22px;
+    }
+
+    .card {
+      min-height: 420px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .thumb {
+      position: relative;
+      height: 220px;
+      border-bottom: 1px solid var(--line);
+      overflow: hidden;
+      background: #f5f6f8;
+      display: block;
+    }
+
+    .thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: top center;
+      display: block;
+    }
+
+    .thumb::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: 24px 24px 0 0;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+      pointer-events: none;
+    }
+
+    .body {
+      flex: 1;
+      padding: 20px 22px 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .tag {
+      width: fit-content;
+      padding: 5px 9px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--blue);
+      background: var(--blue-soft);
+    }
+
+    .tag.warm { color: var(--warm); background: #fbefe9; }
+    .tag.green { color: #047857; background: #e8f8f1; }
+
+    h2 {
+      margin: 0;
+      font-size: 24px;
+      letter-spacing: -0.035em;
+    }
+
+    .body p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .traits {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: auto;
+    }
+
+    .traits span {
+      padding: 7px 9px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: #3d4657;
+      font-size: 12px;
+      background: #fbfcfe;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 4px;
+    }
+
+    a.button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      padding: 0 14px;
+      border-radius: 12px;
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 700;
+      transition: transform 160ms ease, background 160ms ease, border-color 160ms ease;
+    }
+
+    a.button.primary { color: #fff; background: var(--blue); }
+    a.button.secondary { color: var(--ink); border: 1px solid var(--line); background: #fff; }
+    a.button:hover { transform: translateY(-1px); }
+    a.button:focus-visible { outline: 3px solid rgba(37, 99, 235, 0.28); outline-offset: 2px; }
+
+    .note {
+      margin-top: 26px;
+      padding: 18px 20px;
+      border: 1px solid #d9e3f7;
+      border-radius: 18px;
+      color: #27405f;
+      background: #f3f7ff;
+      line-height: 1.7;
+      font-size: 14px;
+    }
+
+    @media (max-width: 920px) {
+      .hero, .grid { grid-template-columns: 1fr; }
+      .meta-card { min-width: 0; }
+      .thumb iframe { transform: scale(0.33); }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero" aria-labelledby="title">
+      <div>
+        <h1 id="title">Exam to HTML · M2 UI 方向选择</h1>
+        <p>下面是 4 个可直接打开的静态 HTML 方案。它们都遵守设计文档主线：教师只看见「拖 PDF → 开始转换 → HTML 自动打开」，输出位置默认桌面，高级设置折叠，不主动推销 MinerU token。</p>
+      </div>
+      <aside class="meta-card" aria-label="预览说明">
+        <strong>预览方式</strong>
+        <span>每张卡片点「打开全屏预览」。这些文件只在 docs/ui-prototypes 下，不改现有生产 UI。</span>
+      </aside>
+    </section>
+
+    <section class="grid" aria-label="四个 UI 方案">
+      <article class="card">
+        <div class="thumb"><img src="screenshots/01-drop-and-go.png" alt="Drop-and-Go 缩略图"></div>
+        <div class="body">
+          <span class="tag">最稳妥</span>
+          <h2>01 · Drop-and-Go 极简向导</h2>
+          <p>最接近设计文档 §1.1 原始 mockup：单窗口、单主按钮、三步状态条。适合先把 v1 做到「李老师 5 秒懂」。</p>
+          <div class="traits"><span>低学习成本</span><span>低实现风险</span><span>适合 1366×768</span></div>
+          <div class="actions"><a class="button primary" href="01-drop-and-go.html">打开全屏预览</a><a class="button secondary" href="screenshots/01-drop-and-go.png" target="_blank">看大图</a></div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="thumb"><img src="screenshots/02-workbench.png" alt="Workbench 缩略图"></div>
+        <div class="body">
+          <span class="tag">最专业</span>
+          <h2>02 · Workbench 双栏工作台</h2>
+          <p>左侧控制三步，右侧实时预览和日志，像 Windows 桌面工具。适合强调「我知道系统在做什么」。</p>
+          <div class="traits"><span>左控右看</span><span>进度可信</span><span>桌面工具气质</span></div>
+          <div class="actions"><a class="button primary" href="02-workbench.html">打开全屏预览</a><a class="button secondary" href="screenshots/02-workbench.png" target="_blank">看大图</a></div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="thumb"><img src="screenshots/03-one-desk.png" alt="One Desk 缩略图"></div>
+        <div class="body">
+          <span class="tag green">最有产品感</span>
+          <h2>03 · One Desk Bento 课桌</h2>
+          <p>把「输入 / 队列 / 最近进度」拆成三张卡。更像成熟小工具，支持未来多 PDF 排队，但仍不暴露技术细节。</p>
+          <div class="traits"><span>卡片清晰</span><span>可扩展队列</span><span>完成记录明确</span></div>
+          <div class="actions"><a class="button primary" href="03-one-desk.html">打开全屏预览</a><a class="button secondary" href="screenshots/03-one-desk.png" target="_blank">看大图</a></div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="thumb"><img src="screenshots/04-desk-drawer.png" alt="Desk Drawer 缩略图"></div>
+        <div class="body">
+          <span class="tag warm">最有记忆点</span>
+          <h2>04 · Desk Drawer 纸张抽屉</h2>
+          <p>温暖纸张隐喻：像把 PDF 放到备课桌上处理。更有品牌气质，但需要控制不要变得过度文艺。</p>
+          <div class="traits"><span>温暖教育感</span><span>纸张隐喻</span><span>不幼稚</span></div>
+          <div class="actions"><a class="button primary" href="04-desk-drawer.html">打开全屏预览</a><a class="button secondary" href="screenshots/04-desk-drawer.png" target="_blank">看大图</a></div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="thumb"><img src="screenshots/02b-workbench-warm.png" alt="Workbench 暖橙版缩略图"></div>
+        <div class="body">
+          <span class="tag warm">你刚刚提的</span>
+          <h2>02b · Workbench 暖橙版</h2>
+          <p>02 的版式 + PDF2PPT 的暖橙 token：珊瑚橙 CTA、暖灰底、Inter 字体。结构和功能完全不变，只换皮。</p>
+          <div class="traits"><span>珊瑚橙主色</span><span>暖灰底</span><span>PDF2PPT 同源</span></div>
+          <div class="actions"><a class="button primary" href="02b-workbench-warm.html">打开全屏预览</a><a class="button secondary" href="screenshots/02b-workbench-warm.png" target="_blank">看大图</a></div>
+        </div>
+      </article>
+    </section>
+
+    <p class="note"><strong>我的初步判断：</strong>如果目标是 M2 稳健落地，优先选 01；如果想让产品一眼不像 demo，选 02；如果已经确定要支持多 PDF 队列，选 03；04 适合后续品牌化，但不是第一优先。</p>
+  </main>
+</body>
+</html>

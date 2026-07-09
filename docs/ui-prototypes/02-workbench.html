@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>02 Workbench · Exam to HTML</title>
+  <style>
+    :root {
+      --canvas: #f8f9fb;
+      --panel: #ffffff;
+      --ink: #1a1d24;
+      --secondary: #5a6273;
+      --muted: #8b92a1;
+      --line: #e4e6eb;
+      --line-strong: #cbd0da;
+      --accent: #2c5ff7;
+      --accent-soft: #eaf0fe;
+      --success: #1f9f5a;
+      --warning: #f5a623;
+      --error: #e5484d;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      overflow: hidden;
+    }
+    button, input { font: inherit; }
+
+    .back {
+      position: fixed;
+      z-index: 20;
+      left: 14px;
+      top: 12px;
+      color: var(--secondary);
+      text-decoration: none;
+      font-size: 12px;
+      font-weight: 700;
+      background: rgba(255,255,255,0.86);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 7px 10px;
+    }
+
+    .app {
+      height: 100vh;
+      display: grid;
+      grid-template-rows: 48px 1fr;
+      background: var(--canvas);
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px 0 120px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,0.85);
+      backdrop-filter: blur(12px);
+    }
+
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 750; letter-spacing: -0.02em; }
+    .logo {
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--ink);
+      border-radius: 6px;
+      background: var(--panel);
+    }
+    .logo::before { content: ""; width: 10px; height: 13px; border: 2px solid var(--accent); border-radius: 2px; }
+    .top-actions { display: flex; align-items: center; gap: 12px; color: var(--secondary); font-size: 12px; }
+    .window-btns { display: flex; gap: 5px; }
+    .window-btns span { width: 14px; height: 14px; border: 1px solid var(--line-strong); border-radius: 3px; background: #fff; }
+
+    .workspace {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 430px 1fr;
+    }
+
+    .left {
+      min-height: 0;
+      padding: 22px;
+      border-right: 1px solid var(--line);
+      background: #fff;
+      overflow: auto;
+    }
+
+    .right {
+      min-width: 0;
+      min-height: 0;
+      padding: 22px;
+      display: grid;
+      grid-template-rows: minmax(320px, 1fr) 240px;
+      gap: 18px;
+      overflow: hidden;
+    }
+
+    .step-card {
+      position: relative;
+      margin-bottom: 14px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--panel);
+    }
+    .step-card.active { border-color: rgba(44, 95, 247, 0.45); box-shadow: inset 3px 0 0 var(--accent); }
+    .step-card.done { border-color: rgba(31, 159, 90, 0.28); }
+
+    .step-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+    .badge {
+      width: 26px;
+      height: 26px;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      background: var(--ink);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .done .badge { background: var(--success); }
+    .active .badge { background: var(--accent); }
+    .step-title { margin: 0; font-size: 15px; font-weight: 760; }
+    .step-sub { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+
+    .drop {
+      height: 158px;
+      display: grid;
+      place-items: center;
+      border: 2px dashed var(--accent);
+      border-radius: 14px;
+      background: var(--accent-soft);
+      text-align: center;
+    }
+    .drop strong { display: block; font-size: 18px; letter-spacing: -0.025em; }
+    .drop span { display: block; margin-top: 6px; color: var(--secondary); font-size: 12px; }
+    .doc-mini {
+      width: 38px;
+      height: 48px;
+      margin: 0 auto 10px;
+      border: 2px solid var(--accent);
+      border-radius: 7px;
+      background: white;
+      position: relative;
+    }
+    .doc-mini::after { content: ""; position: absolute; left: 8px; right: 8px; top: 14px; height: 2px; background: var(--accent); box-shadow: 0 8px 0 var(--accent); opacity: 0.65; }
+
+    .file-pill {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: center;
+      margin-top: 12px;
+      padding: 10px 12px;
+      border: 1px solid #bfdbfe;
+      border-radius: 12px;
+      color: #1e3a8a;
+      background: #eff6ff;
+      font-size: 12px;
+    }
+    .file-pill b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-pill code { font-family: var(--mono); color: var(--secondary); }
+
+    .input-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
+    .path-input { min-width: 0; height: 42px; border: 1px solid var(--line-strong); border-radius: 10px; padding: 0 12px; font-family: var(--mono); font-size: 12px; color: var(--secondary); background: #fbfcfe; }
+    .small-btn { height: 42px; padding: 0 13px; border: 1px solid var(--line-strong); border-radius: 10px; background: #fff; color: var(--ink); font-size: 13px; font-weight: 720; cursor: pointer; }
+
+    details summary { cursor: pointer; list-style: none; color: var(--secondary); font-size: 13px; font-weight: 720; }
+    details summary::-webkit-details-marker { display: none; }
+    details summary::before { content: "▸ "; color: var(--muted); }
+    details[open] summary::before { content: "▾ "; }
+    .token-box { margin-top: 12px; }
+    .token-box input { width: 100%; height: 40px; border: 1px solid var(--line-strong); border-radius: 10px; padding: 0 12px; }
+    .token-box p { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+
+    .primary {
+      width: 100%;
+      height: 50px;
+      border: 0;
+      border-radius: 13px;
+      color: #fff;
+      background: var(--accent);
+      box-shadow: 0 10px 22px rgba(44, 95, 247, 0.22);
+      font-size: 15px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .preview-card, .log-card {
+      min-height: 0;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--panel);
+      overflow: hidden;
+      box-shadow: 0 10px 28px rgba(26, 29, 36, 0.04);
+    }
+
+    .preview-head, .log-head {
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--line);
+      color: var(--secondary);
+      font-size: 13px;
+      font-weight: 720;
+    }
+    .status-dot { display: inline-flex; align-items: center; gap: 7px; color: var(--accent); }
+    .status-dot::before { content: ""; width: 8px; height: 8px; border-radius: 999px; background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+
+    .preview-body {
+      height: calc(100% - 48px);
+      padding: 22px;
+      display: grid;
+      grid-template-columns: minmax(220px, 360px) 1fr;
+      gap: 22px;
+      align-items: stretch;
+    }
+
+    .pdf-page {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+      box-shadow: 0 14px 30px rgba(26, 29, 36, 0.08);
+      padding: 22px;
+      overflow: hidden;
+    }
+    .paper-line { height: 9px; margin-bottom: 12px; border-radius: 999px; background: #e5e7eb; }
+    .paper-line.dark { width: 52%; background: #94a3b8; }
+    .paper-line.mid { width: 78%; }
+    .paper-line.short { width: 46%; }
+    .answer-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 22px; }
+    .answer-grid span { height: 26px; border: 1px solid var(--line); border-radius: 8px; background: #f8fafc; }
+
+    .result-panel { display: flex; flex-direction: column; justify-content: center; gap: 16px; min-width: 0; }
+    .result-panel h1 { margin: 0; font-size: clamp(28px, 4vw, 48px); line-height: 1.04; letter-spacing: -0.06em; }
+    .result-panel p { margin: 0; color: var(--secondary); line-height: 1.65; }
+    .preview-actions { display: flex; gap: 10px; }
+    .preview-actions button { height: 42px; padding: 0 14px; border-radius: 10px; font-weight: 760; cursor: pointer; }
+    .open { border: 0; color: #fff; background: var(--accent); }
+    .ghost { border: 1px solid var(--line-strong); color: var(--ink); background: #fff; }
+
+    .log-card { display: grid; grid-template-rows: 48px 1fr; }
+    .progress-line { padding: 14px 16px 0; }
+    .progress-meta { display: flex; justify-content: space-between; color: var(--secondary); font: 12px var(--mono); }
+    .bar { height: 7px; margin-top: 10px; border-radius: 999px; overflow: hidden; background: #e5e7eb; }
+    .bar div { width: 74%; height: 100%; border-radius: inherit; background: var(--accent); }
+    .logs { padding: 12px 16px 16px; color: #3f4758; font: 12px/1.65 var(--mono); overflow: hidden; }
+    .logs div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .logs .now { color: var(--accent); font-weight: 800; }
+    .logs .ok { color: var(--success); }
+
+    button:focus-visible, .back:focus-visible, summary:focus-visible { outline: 3px solid rgba(44, 95, 247, 0.25); outline-offset: 2px; }
+
+    @media (max-width: 980px) {
+      body { overflow: auto; }
+      .app { min-height: 100vh; height: auto; }
+      .topbar { padding-left: 100px; }
+      .workspace { grid-template-columns: 1fr; }
+      .left { border-right: 0; border-bottom: 1px solid var(--line); }
+      .right { grid-template-rows: auto auto; }
+      .preview-body { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <a class="back" href="index.html">← 方案列表</a>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand"><span class="logo" aria-hidden="true"></span><span>exam-to-html 工作台</span></div>
+      <div class="top-actions"><span>关于</span><span>日志</span><span>v0.3.0</span><span class="window-btns"><span></span><span></span><span></span></span></div>
+    </header>
+
+    <main class="workspace">
+      <section class="left" aria-label="转换控制">
+        <article class="step-card done">
+          <div class="step-head"><span class="badge">✓</span><div><h2 class="step-title">拖入 PDF</h2><p class="step-sub">支持拖放，也可以点击选择文件</p></div></div>
+          <div class="drop"><div><div class="doc-mini" aria-hidden="true"></div><strong>Drop PDF here</strong><span>或点击选择文件</span></div></div>
+          <div class="file-pill"><b>高一期中物理试卷.pdf</b><code>18.4 MB</code></div>
+        </article>
+
+        <article class="step-card active">
+          <div class="step-head"><span class="badge">2</span><div><h2 class="step-title">输出位置</h2><p class="step-sub">默认保存到桌面，完成后自动打开</p></div></div>
+          <div class="input-row"><input class="path-input" value="C:\Users\李老师\Desktop" aria-label="输出位置"><button class="small-btn">浏览...</button></div>
+        </article>
+
+        <article class="step-card">
+          <div class="step-head"><span class="badge">3</span><div><h2 class="step-title">高级设置</h2><p class="step-sub">可选，不影响基本转换</p></div></div>
+          <details>
+            <summary>MinerU Token</summary>
+            <div class="token-box"><input type="password" placeholder="不填也能用"><p>填了之后能识别题目类型（单选 / 多选 / 解答）。</p></div>
+          </details>
+        </article>
+
+        <button class="primary">开始转换</button>
+      </section>
+
+      <section class="right" aria-label="预览与进度">
+        <article class="preview-card">
+          <div class="preview-head"><span>实时预览 / 结果确认</span><span class="status-dot">处理中</span></div>
+          <div class="preview-body">
+            <div class="pdf-page" aria-label="PDF 页面缩略预览">
+              <div class="paper-line dark"></div><div class="paper-line mid"></div><div class="paper-line"></div><div class="paper-line short"></div>
+              <div class="answer-grid"><span></span><span></span><span></span><span></span></div>
+              <div style="height: 1px; background:#e5e7eb; margin: 26px 0 16px;"></div>
+              <div class="paper-line mid"></div><div class="paper-line short"></div><div class="paper-line"></div>
+            </div>
+            <div class="result-panel">
+              <h1>HTML 会在这里完成确认</h1>
+              <p>转换完成后，系统会自动在浏览器打开讲评课件。这里保留「打开 HTML」和「在文件夹显示」两个备用动作，避免教师找不到文件。</p>
+              <div class="preview-actions"><button class="open">打开 HTML</button><button class="ghost">在文件夹显示</button></div>
+            </div>
+          </div>
+        </article>
+
+        <article class="log-card">
+          <div class="log-head"><span>转换进度</span><span>74% · 正在生成课件</span></div>
+          <div>
+            <div class="progress-line"><div class="progress-meta"><span>当前任务：高一期中物理试卷.pdf</span><span>预计剩余 00:38</span></div><div class="bar"><div></div></div></div>
+            <div class="logs">
+              <div class="ok">14:32:01 ✓ PDF 已加载</div>
+              <div class="ok">14:32:04 ✓ 正在解析 PDF 文本层</div>
+              <div>14:32:12 ↻ 识别题目结构：9 / 12</div>
+              <div class="now">14:32:28 ↻ 正在生成讲评 HTML</div>
+              <div>14:32:31 · 完成后自动打开浏览器</div>
+            </div>
+          </div>
+        </article>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

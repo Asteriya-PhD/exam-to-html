@@ -4,76 +4,162 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Exam to HTML</title>
-  <link rel="stylesheet" href="/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header>
-    <h1>Exam to HTML</h1>
-    <p class="subtitle">试卷 PDF → 讲评课件</p>
-  </header>
+  <!-- M2 · Workbench 暖橙版 (PDF2PPT 风格) -->
+  <a class="back" href="../../../docs/ui-prototypes/index.html" target="_blank" title="查看 M2 UI 设计原型">设计原型</a>
 
-  <main>
-    <!-- 启动 banner: 上次未完成 PDF (M3-2) -->
-    <div id="incomplete-banner" class="banner hidden" role="alert">
-      <div class="banner-text">
-        <strong>上次有未完成的 PDF</strong>
-        <span id="incomplete-detail"></span>
-      </div>
-      <button id="dismiss-banner" class="btn-link">忽略</button>
-    </div>
-
-    <!-- 拖拽区 -->
-    <div id="dropzone" class="dropzone">
-      <div class="dz-inner">
-        <div class="dz-icon">📄</div>
-        <p class="dz-title">拖 PDF 试卷到这里</p>
-        <p class="dz-sub">或 <a href="#" id="pick-link">点击选择文件</a></p>
-        <p class="dz-filename" id="picked-name"></p>
-      </div>
-      <input type="file" id="filepicker" accept=".pdf,application/pdf" hidden>
-    </div>
-
-    <!-- 输出位置 -->
-    <div class="row output-row">
-      <label>输出位置:</label>
-      <span id="output-dir" class="output-dir">桌面</span>
-    </div>
-
-    <!-- 高级设置 (折叠) -->
-    <details id="advanced">
-      <summary>高级设置</summary>
-      <div class="adv-body">
-        <label class="field">
-          <span>MinerU API Token (可选)</span>
-          <input type="password" id="token" placeholder="不填也能用" autocomplete="off">
-        </label>
-        <p class="hint">
-          💡 不填也能用。<br>
-          填了之后能识别题目类型（单选/多选/解答）。
-        </p>
-        <button id="save-token" class="btn-secondary">保存设置</button>
-
-        <!-- 自动更新 -->
-        <div class="updater-row">
-          <button id="check-update" class="btn-secondary">📦 检查更新</button>
-          <span id="update-status" class="update-status"></span>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">e2h</span>
+        <div>
+          <h1>exam-to-html <span class="workbench-tag">工作台</span></h1>
+          <p class="brand-sub">试卷 PDF → 讲评课件</p>
         </div>
       </div>
-    </details>
+      <div class="top-actions">
+        <span>关于</span>
+        <span>日志</span>
+        <span class="version">v0.3.0</span>
+        <span class="window-btns" aria-hidden="true"><span></span><span></span><span></span></span>
+      </div>
+    </header>
 
-    <!-- 操作 -->
-    <button id="start" class="btn-primary" disabled>开始转换</button>
+    <main class="workspace">
+      <!-- ============ 左栏：转换控制 ============ -->
+      <section class="left" aria-label="转换控制">
 
-    <!-- 状态 -->
-    <div id="status" class="status hidden" role="status" aria-live="polite"></div>
+        <!-- M3-2 启动 banner -->
+        <div id="incomplete-banner" class="banner hidden" role="alert">
+          <div class="banner-text">
+            <strong>上次有未完成的 PDF</strong>
+            <span id="incomplete-detail"></span>
+          </div>
+          <div class="banner-actions">
+            <button id="dismiss-banner" class="btn-link">忽略</button>
+            <button id="clear-incomplete" class="btn-link warn hidden">丢弃</button>
+          </div>
+        </div>
 
-    <!-- 结果 -->
-    <div id="result" class="result hidden">
-      <p>✅ HTML 已保存到 <code id="result-path"></code></p>
-      <button id="open-btn" class="btn-secondary">在浏览器打开</button>
-    </div>
-  </main>
+        <article id="step-drop" class="step-card done">
+          <div class="step-head">
+            <span class="badge" aria-hidden="true">1</span>
+            <div>
+              <h2 class="step-title">拖入 PDF</h2>
+              <p class="step-sub">支持拖放，也可以点击选择文件</p>
+            </div>
+          </div>
+          <label id="dropzone" class="drop" for="filepicker" tabindex="0" aria-label="拖放或点击选择 PDF 文件">
+            <div>
+              <div class="doc-mini" aria-hidden="true"></div>
+              <strong>Drop PDF here</strong>
+              <span>或 <a href="#" id="pick-link" onclick="event.preventDefault();">点击选择文件</a></span>
+            </div>
+            <input type="file" id="filepicker" accept=".pdf,application/pdf" hidden>
+          </label>
+          <div id="file-pill" class="file-pill hidden">
+            <b id="picked-name">filename.pdf</b>
+            <code id="picked-size">0 MB</code>
+          </div>
+        </article>
 
-  <script src="/app.js"></script>
+        <article id="step-output" class="step-card active">
+          <div class="step-head">
+            <span class="badge" aria-hidden="true">2</span>
+            <div>
+              <h2 class="step-title">输出位置</h2>
+              <p class="step-sub">默认保存到桌面，完成后自动打开</p>
+            </div>
+          </div>
+          <div class="input-row">
+            <input id="output-dir" class="path-input" value="桌面" aria-label="输出位置" readonly>
+            <button class="small-btn" type="button">浏览...</button>
+          </div>
+        </article>
+
+        <article id="step-advanced" class="step-card">
+          <div class="step-head">
+            <span class="badge" aria-hidden="true">3</span>
+            <div>
+              <h2 class="step-title">高级设置</h2>
+              <p class="step-sub">可选，不影响基本转换</p>
+            </div>
+          </div>
+          <details id="advanced">
+            <summary>MinerU Token</summary>
+            <div class="token-box">
+              <label for="token" class="visually-hidden">MinerU API Token</label>
+              <input type="password" id="token" placeholder="不填也能用" autocomplete="off">
+              <p>填了之后能识别题目类型（单选 / 多选 / 解答）。</p>
+              <button id="save-token" class="small-btn" type="button">保存 Token</button>
+            </div>
+          </details>
+        </article>
+
+        <button id="start" class="primary" type="button" disabled>开始转换</button>
+      </section>
+
+      <!-- ============ 右栏：预览 + 进度 ============ -->
+      <section class="right" aria-label="预览与进度">
+        <article class="preview-card">
+          <div class="preview-head">
+            <span>实时预览 / 结果确认</span>
+            <span class="status-dot" id="status-dot">等待中</span>
+          </div>
+          <div class="preview-body">
+            <div class="pdf-page" aria-label="PDF 页面缩略预览">
+              <div class="paper-line dark"></div>
+              <div class="paper-line mid"></div>
+              <div class="paper-line"></div>
+              <div class="paper-line short"></div>
+              <div class="answer-grid"><span></span><span></span><span></span><span></span></div>
+              <div class="page-divider"></div>
+              <div class="paper-line mid"></div>
+              <div class="paper-line short"></div>
+              <div class="paper-line"></div>
+            </div>
+            <div class="result-panel">
+              <h1 id="result-headline">HTML 会在这里完成确认</h1>
+              <p>转换完成后，系统会自动在浏览器打开讲评课件。这里保留「打开 HTML」和「在文件夹显示」两个备用动作，避免教师找不到文件。</p>
+              <div class="preview-actions">
+                <button id="open-btn" class="open" type="button">打开 HTML</button>
+                <button class="ghost" type="button" id="reveal-btn">在文件夹显示</button>
+              </div>
+              <div id="result" class="result hidden">
+                <code id="result-path" class="result-path"></code>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="log-card">
+          <div class="log-head">
+            <span>转换进度</span>
+            <span id="progress-pct">待开始</span>
+          </div>
+          <div class="log-body">
+            <div class="progress-line">
+              <div class="progress-meta">
+                <span id="progress-task">当前任务：—</span>
+                <span id="progress-eta"></span>
+              </div>
+              <div class="bar" aria-hidden="true"><div id="progress-bar" style="width:0%"></div></div>
+            </div>
+            <div class="logs" id="logs" role="status" aria-live="polite">
+              <div class="log-line muted">等待文件...</div>
+            </div>
+            <div id="status" class="status hidden" role="status" aria-live="polite"></div>
+          </div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
 </body>
 </html>

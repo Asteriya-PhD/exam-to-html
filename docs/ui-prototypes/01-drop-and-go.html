@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>01 Drop-and-Go · Exam to HTML</title>
+  <style>
+    :root {
+      --bg: #f7f8fa;
+      --surface: #ffffff;
+      --ink: #1a1d23;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --line-strong: #cbd5e1;
+      --blue: #2563eb;
+      --blue-dark: #1d4ed8;
+      --blue-soft: #eff6ff;
+      --green: #10b981;
+      --green-soft: #ecfdf5;
+      --red: #dc2626;
+      --amber: #f59e0b;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { height: 100%; }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+
+    button, input { font: inherit; }
+
+    .window {
+      width: min(720px, 100%);
+      min-height: 700px;
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--surface);
+      box-shadow: 0 18px 52px rgba(15, 23, 42, 0.10);
+      overflow: hidden;
+    }
+
+    .titlebar {
+      min-height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.92);
+    }
+
+    .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; letter-spacing: -0.02em; }
+    .mark {
+      width: 28px;
+      height: 34px;
+      position: relative;
+      border: 2px solid var(--blue);
+      border-radius: 7px;
+      background: #fff;
+    }
+    .mark::before, .mark::after { content: ""; position: absolute; left: 6px; right: 6px; height: 2px; background: var(--blue); border-radius: 999px; }
+    .mark::before { top: 10px; }
+    .mark::after { top: 18px; width: 10px; right: auto; }
+    .top-meta { color: var(--muted); font-size: 12px; display: flex; gap: 14px; }
+
+    .content {
+      flex: 1;
+      padding: 24px 34px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 2px;
+    }
+
+    .step {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 22px;
+      height: 22px;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      border: 1px solid var(--line-strong);
+      background: #fff;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .step.active { color: var(--blue); font-weight: 700; }
+    .step.active .dot { border-color: var(--blue); background: var(--blue); color: #fff; }
+    .step.done { color: #047857; }
+    .step.done .dot { border-color: var(--green); background: var(--green-soft); color: #047857; }
+
+    .dropzone {
+      min-height: 256px;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      border: 2px dashed var(--line-strong);
+      border-radius: 18px;
+      background: linear-gradient(180deg, #fff 0%, #fbfcfe 100%);
+      text-align: center;
+      transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+    }
+
+    .dropzone:hover, .dropzone.dragging {
+      border-color: var(--blue);
+      background: var(--blue-soft);
+      transform: translateY(-1px);
+    }
+
+    .file-icon {
+      width: 74px;
+      height: 88px;
+      margin: 0 auto 18px;
+      position: relative;
+      border: 2px solid #94a3b8;
+      border-radius: 14px;
+      background: #fff;
+      box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+    }
+    .file-icon::before {
+      content: "";
+      position: absolute;
+      top: -2px;
+      right: -2px;
+      width: 26px;
+      height: 26px;
+      background: linear-gradient(135deg, #dbeafe 0 50%, transparent 50%);
+      border-left: 2px solid #94a3b8;
+      border-bottom: 2px solid #94a3b8;
+      border-radius: 0 12px 0 6px;
+    }
+    .file-icon::after {
+      content: "PDF";
+      position: absolute;
+      left: 13px;
+      bottom: 16px;
+      color: var(--blue);
+      font-size: 17px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+    }
+
+    .drop-title { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.035em; }
+    .drop-sub { margin: 8px 0 0; color: var(--muted); font-size: 15px; }
+    .pick { color: var(--blue); font-weight: 700; text-decoration: none; }
+
+    .selected {
+      margin-top: 16px;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border: 1px solid #bbf7d0;
+      border-radius: 999px;
+      background: var(--green-soft);
+      color: #047857;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .selected .mini-check { width: 18px; height: 18px; display: grid; place-items: center; border-radius: 999px; background: var(--green); color: #fff; font-size: 12px; }
+
+    .output {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 12px;
+      padding: 13px 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fbfcfe;
+    }
+    .output label { color: var(--muted); font-size: 13px; }
+    .path {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: #334155;
+      font-size: 13px;
+    }
+    .link-btn { border: 0; background: transparent; color: var(--blue); font-weight: 700; cursor: pointer; padding: 6px 8px; border-radius: 8px; }
+    .link-btn:hover { background: var(--blue-soft); }
+
+    .cta {
+      min-height: 54px;
+      border: 0;
+      border-radius: 14px;
+      background: var(--blue);
+      color: #fff;
+      font-size: 16px;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 10px 22px rgba(37, 99, 235, 0.22);
+    }
+    .cta:hover { background: var(--blue-dark); }
+    .cta:focus-visible, .link-btn:focus-visible, summary:focus-visible { outline: 3px solid rgba(37, 99, 235, 0.24); outline-offset: 2px; }
+
+    .progress {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      overflow: hidden;
+      background: #fff;
+    }
+    .progress-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 14px 16px 10px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .progress-head span:last-child { color: var(--blue); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .bar { height: 7px; margin: 0 16px 12px; overflow: hidden; border-radius: 999px; background: #e2e8f0; }
+    .bar div { width: 62%; height: 100%; border-radius: inherit; background: var(--blue); }
+    .log {
+      margin: 0;
+      padding: 12px 16px 14px;
+      border-top: 1px solid var(--line);
+      color: #475569;
+      background: #f8fafc;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.65;
+      white-space: pre-wrap;
+    }
+
+    details {
+      border: 1px solid transparent;
+      border-radius: 14px;
+      background: transparent;
+    }
+    summary {
+      width: fit-content;
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 13px;
+      list-style: none;
+      padding: 8px 2px;
+    }
+    summary::-webkit-details-marker { display: none; }
+    summary::before { content: "▸ "; }
+    details[open] summary::before { content: "▾ "; }
+    .adv-body {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: end;
+      margin-top: 6px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fbfcfe;
+    }
+    .field span { display: block; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+    .field input { width: 100%; height: 42px; border: 1px solid var(--line-strong); border-radius: 10px; padding: 0 12px; }
+    .save { height: 42px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: 10px; background: #fff; color: var(--ink); font-weight: 700; }
+    .hint { grid-column: 1 / -1; margin: -2px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+
+    .back {
+      position: fixed;
+      left: 18px;
+      top: 18px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 700;
+      background: rgba(255,255,255,0.86);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 12px;
+    }
+
+    @media (max-height: 760px) {
+      body { padding: 14px; }
+      .window { min-height: auto; }
+      .dropzone { min-height: 220px; }
+      .content { gap: 14px; padding: 20px 28px 22px; }
+    }
+  </style>
+</head>
+<body>
+  <a class="back" href="index.html">← 方案列表</a>
+  <section class="window" aria-label="Drop-and-Go UI prototype">
+    <header class="titlebar">
+      <div class="brand"><span class="mark" aria-hidden="true"></span><span>试卷转网页</span></div>
+      <div class="top-meta"><span>v0.3.0</span><span>保存到：桌面</span></div>
+    </header>
+
+    <main class="content">
+      <nav class="steps" aria-label="转换步骤">
+        <div class="step done"><span class="dot">✓</span><span>选择文件</span></div>
+        <div class="step active"><span class="dot">2</span><span>开始转换</span></div>
+        <div class="step"><span class="dot">3</span><span>完成</span></div>
+      </nav>
+
+      <section class="dropzone dragging" aria-label="拖放 PDF 区域">
+        <div>
+          <div class="file-icon" aria-hidden="true"></div>
+          <p class="drop-title">拖 PDF 试卷到这里</p>
+          <p class="drop-sub">或 <a class="pick" href="#">点击选择文件</a></p>
+          <div class="selected"><span class="mini-check">✓</span><span>已选择：高一期中物理试卷.pdf · 18.4 MB</span></div>
+        </div>
+      </section>
+
+      <section class="output" aria-label="输出位置">
+        <label>保存到</label>
+        <div class="path">C:\Users\李老师\Desktop</div>
+        <button class="link-btn">更改</button>
+      </section>
+
+      <button class="cta">开始转换</button>
+
+      <section class="progress" aria-live="polite" aria-label="转换进度">
+        <div class="progress-head"><span>正在解析 PDF，第 7 / 12 题</span><span>62%</span></div>
+        <div class="bar" aria-hidden="true"><div></div></div>
+        <pre class="log">14:32:01  PDF 已加载：高一期中物理试卷.pdf
+14:32:04  正在解析 PDF 文本层
+14:32:12  正在整理题目结构：7 / 12
+14:32:18  下一步：生成讲评 HTML</pre>
+      </section>
+
+      <details>
+        <summary>高级设置（可选）</summary>
+        <div class="adv-body">
+          <label class="field"><span>MinerU API Token（可选）</span><input type="password" placeholder="不填也能用" value=""></label>
+          <button class="save">保存</button>
+          <p class="hint">不填也能用。填了之后能识别题目类型（单选 / 多选 / 解答）。</p>
+        </div>
+      </details>
+    </main>
+  </section>
+</body>
+</html>

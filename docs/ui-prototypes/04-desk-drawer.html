@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>04 Desk Drawer · Exam to HTML</title>
+  <style>
+    :root {
+      --desk: #e8dfd3;
+      --paper: #fbf7ef;
+      --ink: #2a2620;
+      --muted: #6b6258;
+      --rule: #c9beae;
+      --rule-soft: #ddd2c2;
+      --red-ink: #b8543a;
+      --green: #5c7a5a;
+      --green-soft: #eef4ea;
+      --shadow: 0 18px 42px rgba(55, 42, 29, 0.12), 0 2px 3px rgba(55, 42, 29, 0.06);
+      --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 18% 18%, rgba(255,255,255,0.32), transparent 28rem),
+        linear-gradient(135deg, rgba(100,73,45,0.06) 25%, transparent 25%) 0 0 / 26px 26px,
+        var(--desk);
+      font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    button, input { font: inherit; }
+    .back { position: fixed; left: 18px; top: 18px; z-index: 10; color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 700; background: rgba(251,247,239,0.85); border: 1px solid var(--rule); border-radius: 999px; padding: 8px 12px; }
+
+    .window {
+      width: min(980px, 100%);
+      min-height: min(720px, calc(100vh - 48px));
+      display: grid;
+      grid-template-rows: 70px 1fr auto;
+      border: 1px solid rgba(118, 95, 71, 0.35);
+      border-radius: 12px;
+      background: var(--paper);
+      box-shadow: var(--shadow);
+      position: relative;
+      overflow: hidden;
+    }
+    .window::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, transparent 0 31px, rgba(201,190,174,0.22) 32px); opacity: 0.32; }
+    .window > * { position: relative; }
+
+    .topbar { display: flex; align-items: center; justify-content: space-between; padding: 0 30px; border-bottom: 1px solid var(--rule); background: rgba(251,247,239,0.78); }
+    .title { display: flex; align-items: baseline; gap: 12px; }
+    .title h1 { margin: 0; font-family: Georgia, "Times New Roman", "Songti SC", serif; font-size: 28px; letter-spacing: -0.045em; }
+    .clip { width: 15px; height: 28px; border: 2px solid var(--red-ink); border-left: 0; border-radius: 0 12px 12px 0; transform: rotate(18deg); opacity: 0.86; }
+    .status { color: var(--muted); font: 12px var(--mono); }
+
+    .desk { padding: 34px 44px 26px; display: grid; grid-template-rows: 1fr auto; gap: 18px; min-height: 0; }
+    .paper-card {
+      min-height: 360px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--rule);
+      border-radius: 8px;
+      background: rgba(255,252,246,0.78);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.82), 0 10px 24px rgba(93, 67, 42, 0.08);
+      padding: 32px;
+    }
+    .drop-border {
+      width: min(640px, 100%);
+      min-height: 300px;
+      display: grid;
+      place-items: center;
+      border: 2px dashed var(--red-ink);
+      border-radius: 7px;
+      text-align: center;
+      padding: 34px;
+      background: rgba(255,255,255,0.22);
+    }
+    .sheet-icon { width: 82px; height: 104px; margin: 0 auto 22px; border: 1.5px solid var(--rule); border-radius: 5px; background: #fffaf2; position: relative; transform: rotate(-1deg); box-shadow: 7px 9px 0 rgba(201,190,174,0.22); }
+    .sheet-icon::before { content: ""; position: absolute; left: 15px; right: 15px; top: 24px; height: 2px; background: var(--rule); box-shadow: 0 14px 0 var(--rule-soft), 0 28px 0 var(--rule-soft), 0 42px 0 var(--rule-soft); }
+    .sheet-icon::after { content: "PDF"; position: absolute; left: 17px; bottom: 15px; color: var(--red-ink); font: 800 15px var(--mono); letter-spacing: 0.08em; }
+    .drop-border h2 { margin: 0; font-family: Georgia, "Times New Roman", "Songti SC", serif; font-size: clamp(34px, 5vw, 54px); letter-spacing: -0.06em; line-height: 0.98; }
+    .drop-border p { margin: 14px 0 0; color: var(--muted); font-size: 15px; }
+    .drop-border a { color: var(--red-ink); font-weight: 800; text-decoration: none; border-bottom: 1px solid currentColor; }
+    .file-note { display: inline-flex; align-items: center; gap: 10px; margin-top: 20px; padding: 9px 12px; border: 1px solid var(--rule); border-radius: 4px; background: rgba(251,247,239,0.88); color: var(--muted); font: 12px var(--mono); }
+    .file-note b { color: var(--ink); }
+
+    .progress { border: 1px solid var(--rule); border-radius: 7px; background: rgba(255,252,246,0.76); overflow: hidden; }
+    .progress-head { display: flex; justify-content: space-between; gap: 18px; padding: 13px 14px 10px; color: var(--muted); font: 12px var(--mono); }
+    .progress-head b { color: var(--ink); font-family: "IBM Plex Sans", sans-serif; }
+    .hairline { height: 3px; margin: 0 14px 13px; border-radius: 999px; background: rgba(201,190,174,0.55); overflow: hidden; }
+    .hairline div { width: 68%; height: 100%; border-radius: inherit; background: var(--green); }
+    .progress-text { padding: 0 14px 13px; color: var(--muted); font-size: 13px; }
+    .progress-text strong { color: var(--green); }
+
+    .advanced { padding: 0 44px 20px; }
+    details { border-top: 1px solid var(--rule); padding-top: 13px; }
+    summary { width: fit-content; cursor: pointer; color: var(--muted); font-size: 13px; list-style: none; }
+    summary::-webkit-details-marker { display: none; }
+    summary::before { content: "▸ "; }
+    details[open] summary::before { content: "▾ "; }
+    .adv-grid { margin-top: 12px; display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }
+    .adv-grid label span { display: block; margin-bottom: 6px; color: var(--muted); font-size: 12px; }
+    .adv-grid input { width: 100%; height: 34px; border: 1px solid var(--rule); border-radius: 4px; padding: 0 10px; background: #fffaf2; }
+    .adv-grid button { height: 34px; border: 1px solid var(--rule); border-radius: 4px; background: #fffaf2; color: var(--ink); font-weight: 800; }
+    .adv-grid p { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 12px; }
+
+    .tray { min-height: 58px; display: grid; grid-template-columns: 1fr auto 1fr; gap: 18px; align-items: center; padding: 0 30px; border-top: 1px solid var(--rule); background: rgba(235,226,214,0.42); color: var(--muted); font-size: 13px; }
+    .tray code { color: var(--ink); font-family: var(--mono); }
+    .tray .center { display: flex; gap: 10px; }
+    .tray button { height: 36px; padding: 0 14px; border: 1px solid var(--rule); border-radius: 4px; background: #fffaf2; color: var(--ink); font-weight: 850; cursor: pointer; }
+    .tray .primary { color: #fff; border-color: var(--red-ink); background: var(--red-ink); }
+    .tray .right { text-align: right; }
+
+    button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visible { outline: 3px solid rgba(184, 84, 58, 0.26); outline-offset: 2px; }
+
+    @media (max-width: 780px) {
+      body { padding: 14px; }
+      .window { min-height: auto; }
+      .topbar, .desk, .advanced, .tray { padding-left: 20px; padding-right: 20px; }
+      .tray { grid-template-columns: 1fr; padding-top: 14px; padding-bottom: 14px; }
+      .tray .right { text-align: left; }
+      .drop-border h2 { font-size: 34px; }
+    }
+  </style>
+</head>
+<body>
+  <a class="back" href="index.html">← 方案列表</a>
+  <section class="window" aria-label="Desk Drawer UI prototype">
+    <header class="topbar">
+      <div class="title"><span class="clip" aria-hidden="true"></span><h1>Exam → HTML</h1></div>
+      <div class="status">Working… 68%</div>
+    </header>
+
+    <main class="desk">
+      <section class="paper-card" aria-label="纸张拖放区">
+        <div class="drop-border">
+          <div>
+            <div class="sheet-icon" aria-hidden="true"></div>
+            <h2>拖入 PDF 试卷</h2>
+            <p>或 <a href="#">点击选择</a>，生成的 HTML 会保存到桌面并自动打开。</p>
+            <div class="file-note"><span>已放入</span><b>高一期中物理试卷.pdf</b><span>18.4 MB</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="progress" aria-live="polite" aria-label="转换进度">
+        <div class="progress-head"><b>正在整理题目结构</b><span>68%</span></div>
+        <div class="hairline"><div></div></div>
+        <div class="progress-text"><strong>当前：</strong>正在解析第 8 / 12 题。未设置 token，使用基础解析中。</div>
+      </section>
+    </main>
+
+    <section class="advanced">
+      <details>
+        <summary>高级设置…</summary>
+        <div class="adv-grid">
+          <label><span>MinerU API Token（可选）</span><input type="password" placeholder="不填也能用"></label>
+          <button>保存</button>
+          <p>填了之后能识别题目类型（单选 / 多选 / 解答）。</p>
+        </div>
+      </details>
+    </section>
+
+    <footer class="tray">
+      <div>输出位置 <code>Desktop\桌面</code></div>
+      <div class="center"><button class="primary">开始转换</button><button>在文件夹中显示</button></div>
+      <div class="right">token 未设置 · 基础解析</div>
+    </footer>
+  </section>
+</body>
+</html>
