@@ -405,11 +405,18 @@ def render_exam_html(
         or topic.get("total_questions")
         or 0
     )
+
+    # 优先用 questions_by_k (老 v0.18 API), 没有则用 topic_questions_list (新 v0.19+ API)
     questions_by_k = (
         compose_result.get("questions_by_k")
         or topic.get("questions_by_k")
         or {}
     )
+    if not questions_by_k:
+        # v0.19+: topic_questions_list 是一维列表 (不再分 K 桶)
+        flat = topic.get("topic_questions_list") or []
+        if flat:
+            questions_by_k = {"_all": flat}
 
     final_title = title or topic.get("title") or "试卷讲评"
 
