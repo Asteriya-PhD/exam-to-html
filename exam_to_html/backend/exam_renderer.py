@@ -9,6 +9,7 @@ exam_to_html.backend.exam_renderer — 试卷讲评 HTML 渲染
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -230,30 +231,23 @@ body:has(.sidebar-rail.collapsed) .main { margin-left: 0; }
 .question-body ol.options {
   list-style: none;
   padding: 0;
-  margin: 12px 0 12px 4px;
+  margin: 8px 0;
   counter-reset: opt-counter;
 }
 .question-body ol.options > li {
-  padding: 8px 12px 8px 36px;
-  margin: 4px 0;
+  padding: 4px 0 4px 28px;
+  margin: 0;
   position: relative;
   line-height: 1.7;
-  border-radius: 6px;
-  background: var(--bg-soft);
-  border: 1px solid transparent;
-  transition: all 0.15s;
-}
-.question-body ol.options > li:hover {
-  border-color: var(--primary);
-  background: #eff6ff;
 }
 .question-body ol.options > li::before {
   counter-increment: opt-counter;
   content: counter(opt-counter, upper-alpha) ".";
-  position: absolute; left: 10px; top: 8px;
+  position: absolute; left: 0; top: 4px;
   font-weight: 700; color: var(--primary);
   font-family: "SF Pro Display", -apple-system, sans-serif;
   font-size: calc(14px * var(--zoom));
+  min-width: 22px;
 }
 
 .question-body h1, .question-body h2, .question-body h3 {
@@ -365,13 +359,16 @@ def _jinja_env() -> Environment:
 
 
 def _load_katex_assets() -> str:
-    """加载 KaTeX JS + auto-render JS, inline 到 HTML."""
+    """加载 KaTeX JS + CSS + auto-render JS, inline 到 HTML."""
     try:
         from topic_garden.ingest.katex import _assets
-        katex_js, _, auto_render_js = _assets()
+        katex_js, katex_css, auto_render_js = _assets()
     except Exception as e:  # noqa: BLE001
         log.warning("[exam_renderer] KaTeX 资源加载失败: %s", e)
         return ""
+
+    # KaTeX CSS 必须 inline, 否则公式符号渲染不出来 (裸文本形式)
+    css_block = f"<style>\n{katex_css}\n</style>"
 
     init_script = """
 <script>
@@ -388,10 +385,105 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>"""
     return (
+        f"{css_block}\n"
         f"<script>\n{katex_js}\n</script>\n"
         f"<script>\n{auto_render_js}\n</script>\n"
         f"{init_script}\n"
     )
+
+
+# ============================================================
+# LaTeX 预处理 — 主动把裸 LaTeX 命令包成 $..$ 让 KaTeX 渲染
+# md_to_html.py 只处理 \frac{}{}, 其它命令 (\theta \alpha \sin \cos \sqrt 等)
+# 大量漏网, 在 renderer 层补这一刀, 不动 topic_garden 的代码
+# ============================================================
+_LATEX_CMDS = (
+    r"theta|alpha|beta|gamma|delta|epsilon|zeta|eta|iota|kappa|lambda|mu|nu|xi|pi|"
+    r"rho|sigma|tau|upsilon|phi|chi|psi|omega|"
+    r"Theta|Alpha|Beta|Gamma|Delta|Epsilon|Zeta|Eta|Iota|Kappa|Lambda|Mu|Nu|Xi|"
+    r"Pi|Rho|Sigma|Tau|Upsilon|Phi|Chi|Psi|Omega|"
+    r"sin|cos|tan|cot|sec|csc|arcsin|arccos|arctan|sinh|cosh|tanh|"
+    r"sqrt|log|ln|exp|lim|sum|prod|int|infty|cdot|times|div|pm|mp|le|ge|neq|"
+    r"approx|equiv|sim|cong|to|rightarrow|leftarrow|leftrightarrow|"
+    r"Rightarrow|Leftarrow|hbar|ell|nabla|partial|Re|Im|"
+    r"forall|exists|in|notin|subset|supset|cup|cap|emptyset|"
+    r"mathbb|mathrm|mathit|mathbf|text|operatorname|boxed|"
+    r"over|underline|vec|hat|tilde|bar|dot|ddot"
+)
+# 匹配 \cmd 或 \cmd{...} 或 \cmd{...}{...}
+_LATEX_CMD_RE = re.compile(
+    r"\\(?:" + _LATEX_CMDS + r")(?:\{[^{}]*\})?(?:\{[^{}]*\})?",
+    re.IGNORECASE,
+)
+
+
+def _wrap_more_latex(html: str) -> str:
+    """把裸 LaTeX 命令 (没在 $..$ 内的) 包成 $..$ 让 KaTeX 渲染.
+
+    ⚠️ 必须在 KaTeX auto-render 跑之前调用, 但这里返回的是 HTML 字符串,
+    KaTeX 在前端 DOMContentLoaded 时跑 — 所以这是后处理, 客户端拿到时
+    KaTeX 会扫到新包的 $..$ 并渲染.
+    """
+    # 把 $...$ 块临时替换为 placeholder, 避免内部命令被二次包裹
+    placeholder = "\x00K{}X\x00"
+    segments: list = []
+    counter = {"i": 0}
+
+    def _protect(m: "re.Match[str]") -> str:
+        segments.append(m.group(0))
+        idx = counter["i"]
+        counter["i"] += 1
+        return placeholder.format(idx)
+
+    # 保护 $$...$$ (display)
+    html2 = re.sub(r"\$\$[\s\S]+?\$\$", _protect, html)
+    # 保护 $...$ (inline)
+    html2 = re.sub(r"\$[^$\n]+?\$", _protect, html2)
+    # 保护已经渲染的 <span class="katex"> 块 (防止反向破坏)
+    html2 = re.sub(
+        r'<span class="katex[^"]*">[\s\S]*?</span>',
+        _protect,
+        html2,
+    )
+
+    # 在剩余文本里包 $..$
+    def _wrap(m: "re.Match[str]") -> str:
+        return "$" + m.group(0) + "$"
+
+    # 但要避免重复包 — 用占位符, 处理后再还原
+    # 上面已经清掉了 $..$, 剩下的 \cmd{...}{...} 都可以安全包
+    html2 = _LATEX_CMD_RE.sub(_wrap, html2)
+
+    # 还原 $...$ 占位符
+    def _restore(m: "re.Match[str]") -> str:
+        idx = int(m.group(1))
+        return segments[idx]
+
+    html2 = re.sub(placeholder.format(r"(\d+)"), _restore, html2)
+    return html2
+
+
+# ============================================================
+# 多空格归一化 — md 里 ` ` 多个连续空格在 HTML 渲染时折叠成 1 个
+# 同时清掉题首题尾的多余空白
+# ============================================================
+_MULTI_WS_RE = re.compile(r"[ \t]{2,}")
+
+
+def _normalize_whitespace(html: str) -> str:
+    # 在 <pre>/<code>/<table> 块内不处理 (保留格式)
+    parts = re.split(r"(<(?:pre|code|table)[\s\S]*?</(?:pre|code|table)>)", html)
+    out = []
+    for p in parts:
+        if p.startswith("<pre") or p.startswith("<code") or p.startswith("<table"):
+            out.append(p)
+        else:
+            # 多空格 / 多 tab 折成 1 个
+            p = _MULTI_WS_RE.sub(" ", p)
+            # 行尾空格去掉
+            p = re.sub(r"[ \t]+\n", "\n", p)
+            out.append(p)
+    return "".join(out)
 
 
 def render_exam_html(
@@ -429,6 +521,11 @@ def render_exam_html(
         questions=compose_result.get("questions") or {},
         stats=compose_result.get("stats") or {},
     )
+
+    # 后处理: 把更多 LaTeX 命令包成 $..$ 让 KaTeX 渲染 (md_to_html.py 只处理 \frac)
+    body = _wrap_more_latex(body)
+    # 归一化多空格
+    body = _normalize_whitespace(body)
 
     katex_block = _load_katex_assets()
 
