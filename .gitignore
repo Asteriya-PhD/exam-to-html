@@ -46,4 +46,8 @@ config.json
 benchmark.html
 assets/
 *.bak
-*.tmp
+*.tmp.env
+
+# 凭证
+.env
+.env.local
