@@ -106,22 +106,41 @@ def courseware_images_dir() -> Path:
 
     模板里 <img src="images/X.jpg"> 是相对路径, 必须在输出 HTML 同级
     才能解析。pipeline 会把这个目录链接到 output_dir/images。
+
+    ⚠️  第一性原理: 这个函数必须返回 topic_garden **实际写图** 的目录,
+    否则 HTML 里的 <img> 全部 404。topic_garden 的落点真源是
+    (见 ingest_inbox.py:240 / figures.py:43):
+        TOPIC_GARDEN_IMG_DEST env  ||  <topic_garden pkg>/../../../courseware/images
+    也就是 topic_garden 包相对定位, **不是** cwd 或任意祖先目录。
+
+    历史 bug (v0.x): 旧实现按 [grandparent, parent, src] 顺序 ancestor-walk
+    找第一个存在的 courseware/images。当 <topic_garden 仓库父目录> 下存在一个
+    无关的 courseware/images (别的流程留下的 recovered_*.png) 时, 会**先命中**
+    错误目录 → 链接到空壳 → 生成的 HTML 图片全 404。改为严格镜像 topic_garden
+    的写图逻辑, 消除对目录存在性的猜测。
     """
+    # 0. dev/editable: 精确镜像 topic_garden 的写图落点 (env 优先, 与其 ingest 完全一致)
+    env_dest = os.environ.get("TOPIC_GARDEN_IMG_DEST")
+    if env_dest:
+        return Path(env_dest)
+
+    import importlib.util
+    spec = importlib.util.find_spec("topic_garden")
+    if spec and spec.submodule_search_locations:
+        # <site>/topic_garden 或 <repo>/src/topic_garden → 包相对上溯三级到 courseware/images
+        # (与 figures.py:43 的 __file__.resolve().parent.parent.parent 同构)
+        pkg_dir = Path(spec.submodule_search_locations[0]).resolve()
+        candidate = pkg_dir.parent.parent / "courseware" / "images"
+        if candidate.is_dir():
+            return candidate
+
     # 1. frozen 模式: 依赖 pyinstaller.spec 把 courseware/images 打进包
     if getattr(sys, "frozen", False):
         meipass = Path(getattr(sys, "_MEIPASS", ""))
         candidate = meipass / "courseware" / "images"
         if candidate.is_dir():
             return candidate
-    # 2. dev 模式: topic_garden 可能以 editable install 装在我们的 .venv 里
-    import importlib.util
-    spec = importlib.util.find_spec("topic_garden")
-    if spec and spec.submodule_search_locations:
-        src_dir = Path(spec.submodule_search_locations[0])
-        for ancestor in [src_dir.parent.parent.parent, src_dir.parent.parent, src_dir.parent]:
-            candidate = ancestor / "courseware" / "images"
-            if candidate.is_dir():
-                return candidate
+
     return Path("courseware") / "images"
 
 

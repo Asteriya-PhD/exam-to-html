@@ -32,6 +32,8 @@ htmlcov/
 
 # 运行时（不要入库）
 logs/
+inbox/
+archive/
 *.log
 *.sqlite3
 *.db
