@@ -211,7 +211,8 @@ exam-to-html/
 │       ├── __init__.py
 │       ├── server.py               # FastAPI app
 │       ├── routes.py               # /api/convert /api/status /api/config
-│       └── pipeline.py             # 复用 topic_garden_app 的 process_inbox + compose
+│       ├── pipeline.py             # 复用 topic_garden_app 的 process_inbox + compose
+│       └── _qnum_fallback.py       # PDF2PPT 题号正则漏掉的格式兜底（（1）/ ① / 第1题 等）
 ├── pyinstaller.spec                # Windows 打包
 ├── pyinstaller.macos.spec          # macOS 打包
 ├── icons/
@@ -311,9 +312,29 @@ exam-to-html/
 | MinerU API 401 | "API token 无效，请在高级设置检查" | 引导到高级设置 |
 | 输出目录无权限 | "无法写入 [目录]，请选择其他位置" | 重新选 |
 | 磁盘空间不足 | "磁盘空间不足，需要至少 200MB" | 释放空间 |
+| **题目未识别** | "PDF 解析未识别到题目：可能是扫描版或题号格式非标准（已自动兜底，失败请尝试 OCR 或检查题号）" | 兜底失败时重试 |
 | 中途关闭 | 下次启动时显示"上次有未完成的 PDF，是否重新处理？" | 重新拖 |
 
-### 5.2 静默错误（不打扰用户）
+### 5.2 NO_QUESTIONS 兜底策略（`_qnum_fallback.py`）
+
+PDF2PPT 的题号正则（`_v2_parser.py:1133`）只支持 `数字 + [.．、 + 空白]`，漏掉 5 类常见格式：
+`（1）` / `(1)` / `①–⑳` / `第1题` / `T1. Q1. 题1.`。
+
+**两层处理**（都在 `exam_to_html/backend/pipeline.py:convert_pdf`）：
+
+1. **诊断消息**：当 `process_inbox` summary 显示 `drafts=0` vs `inserted=0` 区分成因：
+   - `drafts=0` → "PDF 解析未识别到题目（可能是扫描版或题号格式非标准）"
+   - `inserted=0, drafts>0` → "PDF 已入库（全被 dedup 命中）"
+2. **兜底解析**：仅 `drafts=0` 时触发 `extract_drafts_with_lenient_qnum(pdf_path)`，
+   用 PyMuPDF 抽 PDF 全文 + 宽松正则重切题段，走 `add_question_with_dedupe` 入库。
+   零 API 成本（~50ms PyMuPDF），不影响正常 PDF 解析路径。
+
+**已知限制**：
+- PyMuPDF（fitz）不在 exam-to-html 自身 venv，依赖 topic_garden 的 venv 提供（见 README 开发说明）。
+- 兜底无法恢复 `section_title` / `is_multi_select`（填 `None`），适用于讲评场景够用。
+- num > 50 视为误识（试卷实际很少超 50 题；超 100 题需要扩上限）。
+
+### 5.3 静默错误（不打扰用户）
 
 | 错误 | 行为 |
 |---|---|
@@ -322,7 +343,7 @@ exam-to-html/
 | 图片加载失败 | 显示"图片加载失败"占位 |
 | 数据库锁 | 重试 3 次（间隔 100ms） |
 
-### 5.3 日志位置
+### 5.4 日志位置
 
 - `%APPDATA%/exam-to-html/logs/app.log` (Windows)
 - `~/Library/Logs/exam-to-html/app.log` (macOS)
