@@ -59,17 +59,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ../topic_garden_app
 
-      - name: Install PDF2PPT deps (if cloned)
-        shell: bash
-        run: |
-          if [ -d ../PDF2PPT ]; then
-            pip install -r ../PDF2PPT/requirements.txt
-            # 加 pdf2ppt.pth
-            SITE=$(python -c "import site; print(site.getsitepackages()[0])")
-            PDF2PPT_ABS=$(cd ../PDF2PPT && pwd)
-            echo "$PDF2PPT_ABS" > "$SITE/pdf2ppt.pth"
-            echo "✅ pdf2ppt.pth → $PDF2PPT_ABS"
-          fi
+      # 注: PDF2PPT v2 parser 已 vendored 到本仓顶层 pdf2ppt/ (见 README §开发)。
+      # 兄弟仓 PDF2PPT 不再 install (避免空仓 clone 触发找不到 requirements.txt)。
+      # test_smoke 真 PDF E2E 用 pytest.importorskip 自动跳过缺 deps 部分。
 
       - name: Install exam-to-html
         shell: bash
@@ -109,12 +101,8 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ../topic_garden_app
-          if [ -d ../PDF2PPT ]; then
-            pip install -r ../PDF2PPT/requirements.txt
-            SITE=$(python -c "import site; print(site.getsitepackages()[0])")
-            PDF2PPT_ABS=$(cd ../PDF2PPT && pwd)
-            echo "$PDF2PPT_ABS" > "$SITE/pdf2ppt.pth"
-          fi
+          # PDF2PPT v2 parser 已 vendored 进本仓顶层 pdf2ppt/ (见 README §开发)。
+          # 兄弟仓 PDF2PPT 不再 install (避免空仓 clone 触发找不到 requirements.txt)。
           pip install -e .[dev]
 
       - name: PyInstaller
