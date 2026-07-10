@@ -19,6 +19,7 @@ exam_to_html.backend.pipeline — PDF → HTML 讲评课件编排
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import sys
 import tempfile
@@ -177,7 +178,9 @@ def _with_db_retry(fn, *args, **kwargs):
 
 def _ensure_topic_garden_db() -> None:
     from topic_garden import db as tg_db
-    target = str(db_path())
+    # 优先尊重 TOPIC_GARDEN_DB_PATH env var (测试隔离 / CI 用),无 env 才走 paths.db_path()
+    env_db = os.environ.get("TOPIC_GARDEN_DB_PATH")
+    target = env_db if env_db else str(db_path())
     if str(tg_db.DB_PATH) != target:
         tg_db.reset_db_path(target)
     _with_db_retry(tg_db.init_db)
