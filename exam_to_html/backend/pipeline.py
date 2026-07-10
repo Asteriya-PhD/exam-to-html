@@ -252,7 +252,19 @@ def convert_pdf(
     finally:
         shutil.rmtree(temp_inbox, ignore_errors=True)
 
-    from topic_garden.db import Question, Topic, add_topic_question
+    # process_inbox summary 是诊断真相: drafts=0 → parser 没识别到题号(扫描版 / 题号格式
+    # 不符合 / MinerU 失败); inserted=0 但 drafts>0 → 全被 dedup 命中(已存在同题).
+    # 这两种情形都该反映在错误消息里,而不是让 pipeline 后续空查询顶一个"PDF 解析成功".
+    summary = (result or {}).get("summary", {}) if isinstance(result, dict) else {}
+    drafts_total = summary.get("drafts", 0)
+    inserted_total = summary.get("inserted", 0)
+    files_failed = summary.get("files_failed", 0)
+    log.info(
+        "[pipeline] process_inbox summary: %s",
+        {k: summary.get(k) for k in ("drafts", "inserted", "skipped", "near_dup", "files_completed", "files_failed", "files_partial")},
+    )
+
+    from topic_garden.db import Question, Topic, add_topic_question, db as tg_db
 
     questions = _with_db_retry(
         lambda: list(
@@ -263,6 +275,7 @@ def convert_pdf(
         )
     )
     if not questions:
+        # 退化: 时间窗没抓到 (clock skew / 旧数据),再按 stem 全量扫
         questions = _with_db_retry(
             lambda: list(
                 Question.select().where(
@@ -271,7 +284,62 @@ def convert_pdf(
             )
         )
     if not questions:
-        raise NoQuestionsError(f"PDF 解析成功但无题目入库: {pdf_path.name}")
+        # 区分两类失败,前端 message 才能给教师正确的下一步
+        if drafts_total == 0:
+            # Parser 没识别到题号 (扫描版 / 题号格式非标准 / MinerU 静默失败)
+            # ── 兜底: 用 _qnum_fallback 从 PDF 原文按宽松正则重抽 ──
+            # 仅在 drafts=0 时触发, 不影响正常 dedup 路径 (零 API 成本, ~50ms PyMuPDF)
+            from ._qnum_fallback import extract_drafts_with_lenient_qnum
+            fallback_drafts = extract_drafts_with_lenient_qnum(str(pdf_path))
+            if fallback_drafts:
+                log.warning(
+                    "[pipeline] PDF2PPT parser 0 题, 兜底正则抽出 %d 题 — %s",
+                    len(fallback_drafts), pdf_path.name,
+                )
+                recovered = 0
+                for d in fallback_drafts:
+                    try:
+                        _with_db_retry(
+                            lambda d=d: tg_db.add_question_with_dedupe(
+                                content_md=d.content_md,
+                                source_paper=stem,
+                                source_qnum=d.source_qnum,
+                                source_page=d.source_page,
+                                q_type=d.q_type,
+                                notes=d.notes,
+                                figure_paths=getattr(d, "figure_paths", None) or None,
+                                has_figure=getattr(d, "has_figure", None),
+                                is_multi_select=getattr(d, "is_multi_select", None),
+                            )
+                        )
+                        recovered += 1
+                    except Exception as e:
+                        log.warning("[pipeline] fallback insert 跳过: %s", e)
+                if recovered:
+                    # 重查 — 兜底入库的题现在该命中
+                    questions = _with_db_retry(
+                        lambda: list(
+                            Question.select().where(
+                                (Question.source_paper == stem)
+                                & (Question.created_at >= started_wallclock)
+                            ).order_by(Question.created_at, Question.source_qnum)
+                        )
+                    )
+            if not questions:
+                raise NoQuestionsError(
+                    f"PDF 解析未识别到题目 (parser drafts=0, files_failed={files_failed}): "
+                    f"{pdf_path.name} — 可能是扫描版或题号格式非标准"
+                )
+        elif inserted_total == 0 and drafts_total > 0:
+            # 全被 dedup 命中 → 真有题但库中已存在
+            raise NoQuestionsError(
+                f"PDF 已入库 (parser drafts={drafts_total}, 全被 dedup 命中): {pdf_path.name}"
+            )
+        else:
+            raise NoQuestionsError(
+                f"PDF 解析后入库 0 题 (drafts={drafts_total}, inserted={inserted_total}): "
+                f"{pdf_path.name}"
+            )
 
     topic = _with_db_retry(
         lambda: Topic.create(

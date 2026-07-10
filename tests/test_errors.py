@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import tempfile
 import time
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
@@ -258,3 +259,336 @@ class TestIncompleteUploads:
         assert deleted == 2
         assert not p1.exists()
         assert not p2.exists()
+
+
+# ============================================================
+# NoQuestionsError 诊断消息 (M5-1 fix)
+# — 区分 "parser 没识别到题号" vs "全被 dedup 命中",避免给教师错误线索
+# ============================================================
+class TestNoQuestionsDiagnostic:
+    """convert_pdf 在 0 题入库时应给出可定位的错误消息。
+
+    旧实现统一报 "PDF 解析成功但无题目入库" — 在 parser 静默失败时这是误导
+    (教师会以为 PDF 没问题,实际是 MinerU 没识别到题号)。
+
+    新实现读 process_inbox 的 summary 区分两种情形:
+      - drafts=0          → parser 没识别到题号 (扫描版/题号格式非标准/MinerU 失败)
+      - inserted=0, drafts>0 → 真有题但全被 dedup 命中 (库中已有同题)
+    """
+
+    @staticmethod
+    def _make_pdf(tmp_path: Path, name: str = "diag.pdf") -> Path:
+        p = tmp_path / name
+        p.write_bytes(b"%PDF-1.4\n%%EOF\n")
+        return p
+
+    def test_drafts_zero_message_says_parser_failed(self, tmp_path, monkeypatch):
+        """drafts=0 → 错误消息应明确指出 parser 没识别到题号."""
+        pytest.importorskip("topic_garden")
+        from exam_to_html.backend.pipeline import convert_pdf
+        from exam_to_html.errors import NoQuestionsError
+
+        def fake_process_inbox(**kwargs):
+            return {
+                "summary": {
+                    "drafts": 0, "inserted": 0, "skipped": 0, "near_dup": 0,
+                    "files_total": 1, "files_completed": 0,
+                    "files_partial": 0, "files_failed": 1,
+                    "failed_questions": 0,
+                },
+                "files": [],
+            }
+
+        monkeypatch.setattr(
+            "topic_garden.ingest_inbox.process_inbox",
+            fake_process_inbox,
+        )
+
+        pdf = self._make_pdf(tmp_path)
+        out = tmp_path / "out"
+        out.mkdir()
+
+        with pytest.raises(NoQuestionsError) as exc:
+            convert_pdf(pdf_path=pdf, output_dir=out, mode="flash")
+        msg = exc.value.message
+        # 关键诊断关键词:parser drafts=0 + 暗示扫描版/题号格式
+        assert "drafts=0" in msg, f"消息缺 drafts=0 诊断: {msg}"
+        assert "扫描版" in msg or "题号格式" in msg, f"消息缺成因提示: {msg}"
+        # code 仍为 NO_QUESTIONS (前端按 code 渲染)
+        assert exc.value.code == "NO_QUESTIONS"
+
+    def test_dedup_all_skipped_message_says_already_indexed(self, tmp_path, monkeypatch):
+        """drafts>0 但 inserted=0 → 错误消息应明确说已入库."""
+        pytest.importorskip("topic_garden")
+        from exam_to_html.backend.pipeline import convert_pdf
+        from exam_to_html.errors import NoQuestionsError
+
+        def fake_process_inbox(**kwargs):
+            return {
+                "summary": {
+                    "drafts": 5, "inserted": 0, "skipped": 5, "near_dup": 0,
+                    "files_total": 1, "files_completed": 1,
+                    "files_partial": 0, "files_failed": 0,
+                    "failed_questions": 0,
+                },
+                "files": [],
+            }
+
+        monkeypatch.setattr(
+            "topic_garden.ingest_inbox.process_inbox",
+            fake_process_inbox,
+        )
+
+        pdf = self._make_pdf(tmp_path, name="dup.pdf")
+        out = tmp_path / "out"
+        out.mkdir()
+
+        with pytest.raises(NoQuestionsError) as exc:
+            convert_pdf(pdf_path=pdf, output_dir=out, mode="flash")
+        msg = exc.value.message
+        assert "dedup" in msg or "已入库" in msg, f"消息缺 dedup 提示: {msg}"
+        assert "drafts=5" in msg, f"消息缺 drafts 计数: {msg}"
+        assert exc.value.code == "NO_QUESTIONS"
+
+
+# ============================================================
+# 宽松题号兜底 (M5-2 — _qnum_fallback.py)
+# — PDF2PPT 的 QUESTION_PATTERN 漏掉 (1) ① 第1题 T1. 等格式;
+#   本模块在 PDF2PPT 返 0 题时从 PDF 原文按宽松正则重抽。
+# ============================================================
+class TestQnumFallback:
+    """_qnum_fallback 单元测试 — 覆盖 5 类题号格式 + 假阳防护。"""
+
+    def test_matches_parenthesized_full_width(self):
+        from exam_to_html.backend._qnum_fallback import _match_qnum
+        assert _match_qnum("（1） 下列说法正确的是") == 1
+        assert _match_qnum("（12） 第十二题") == 12
+
+    def test_matches_parenthesized_half_width(self):
+        from exam_to_html.backend._qnum_fallback import _match_qnum
+        assert _match_qnum("(2) 关于X的描述") == 2
+        assert _match_qnum("  (3)  第三个") == 3
+
+    def test_matches_circled_digits(self):
+        from exam_to_html.backend._qnum_fallback import _match_qnum
+        assert _match_qnum("① 甲烷分子式") == 1
+        assert _match_qnum("② 乙烷") == 2
+        assert _match_qnum("⑩ 第十题") == 10
+        # 圈码范围 1-20; 超过当无效
+        assert _match_qnum("⓿ 假阳") is None  # '⓿' 是 0, 不在 ①-⑳
+
+    def test_matches_chinese_prefix(self):
+        from exam_to_html.backend._qnum_fallback import _match_qnum
+        assert _match_qnum("第1题 单选题") == 1
+        assert _match_qnum("第 12 题 解答") == 12
+
+    def test_matches_t_prefix(self):
+        from exam_to_html.backend._qnum_fallback import _match_qnum
+        assert _match_qnum("T1. 真题") == 1
+        assert _match_qnum("Q2. 第二题") == 2
+        assert _match_qnum("题3. 第三题") == 3
+
+    def test_matches_plain_digit_period(self):
+        """原 PDF2PPT 兼容格式."""
+        from exam_to_html.backend._qnum_fallback import _match_qnum
+        assert _match_qnum("1. 普通题号") == 1
+        assert _match_qnum("12． 全宽句点") == 12
+        assert _match_qnum("5、 顿号") == 5
+
+    def test_rejects_decimal_data_values(self):
+        """实验数据假阳 — `(?!\\d)` 守住."""
+        from exam_to_html.backend._qnum_fallback import _match_qnum
+        assert _match_qnum("0.05 g 试剂") is None
+        assert _match_qnum("1.14 mol/L 溶液") is None
+        assert _match_qnum("0.848 g·cm") is None
+        assert _match_qnum("m=0.1kg 的物体") is None
+
+    def test_rejects_qnum_above_50(self):
+        """num > 50 多为误识 (实验数据 / 年份), 不当题号."""
+        from exam_to_html.backend._qnum_fallback import _match_qnum
+        assert _match_qnum("2026 年 1 月") is None  # 2026 > 50
+        assert _match_qnum("99. 不可能试卷") is None
+
+    def test_extract_from_mixed_text_skips_instruction_lines(self):
+        from exam_to_html.backend._qnum_fallback import extract_qnums_from_text
+        text = """注意事项: 请先读题
+满分 150 分
+考试时间 120 分钟
+（1） 第一题题干
+（2） 第二题题干
+① 圈码第一
+第1题 中文前缀
+T1. T前缀
+1. 普通
+0.05 g 假阳"""
+        qnums = extract_qnums_from_text(text)
+        nums = [n for (_, n) in qnums]
+        assert nums == [1, 2, 1, 1, 1, 1], f"unexpected: {qnums}"
+        # 注意事项 / 满分 / 考试时间 都跳过了, 0.05 g 没误识
+
+    def test_extract_returns_empty_for_empty_text(self):
+        from exam_to_html.backend._qnum_fallback import extract_qnums_from_text
+        assert extract_qnums_from_text("") == []
+        assert extract_qnums_from_text("没有任何题号的纯文本内容") == []
+
+    def test_extract_drafts_returns_empty_when_no_qnums(self):
+        """PDF 原文里没题号 → 兜底返 [], pipeline 走原 NoQuestionsError 路径."""
+        from exam_to_html.backend._qnum_fallback import extract_drafts_with_lenient_qnum
+        import unittest.mock as mock
+        # PyMuPDF 不在 exam-to-html venv, 直接 mock _iter_pages_text
+        with mock.patch(
+            "exam_to_html.backend._qnum_fallback._iter_pages_text",
+            return_value=[(0, "注意事项\n没有任何题号的纯文本内容")],
+        ):
+            drafts = extract_drafts_with_lenient_qnum("ignored.pdf")
+            assert drafts == []
+
+    def test_extract_drafts_chunks_questions_by_qnum(self):
+        """PDF 原文按 qnum 切分, 每段 → 一条 QuestionDraft."""
+        from exam_to_html.backend._qnum_fallback import extract_drafts_with_lenient_qnum
+        import unittest.mock as mock
+        # 模拟 PyMuPDF 抽出 (1) 格式的题号
+        with mock.patch(
+            "exam_to_html.backend._qnum_fallback._iter_pages_text",
+            return_value=[(0,
+                "注意事项\n"
+                "（1） 第一题题干\n"
+                "继续第一题\n"
+                "（2） 第二题题干\n"
+                "继续第二题\n"
+            )],
+        ):
+            drafts = extract_drafts_with_lenient_qnum("mock.pdf")
+        assert len(drafts) == 2, drafts
+        assert drafts[0].source_qnum == "1"
+        assert "第一题题干" in drafts[0].content_md
+        assert "继续第一题" in drafts[0].content_md
+        assert drafts[1].source_qnum == "2"
+        assert "第二题题干" in drafts[1].content_md
+        # 卷头注意事项不应被任何题"吞"进来 (它是题号前的内容, 全部丢弃)
+        for d in drafts:
+            assert "注意事项" not in d.content_md
+
+
+# ============================================================
+# 兜底与 pipeline 集成 — PDF2PPT 0 题时, _qnum_fallback 接管
+# ============================================================
+class TestQnumFallbackPipelineHook:
+    """convert_pdf 在 process_inbox 返 drafts=0 时, 应调用 _qnum_fallback 兜底."""
+
+    def test_fallback_drafts_insert_into_db_successfully(self, tmp_path, monkeypatch):
+        """fallback 抽出 drafts → 走 add_question_with_dedupe 入库 → DB 可见.
+
+        DB 隔离由 tests/conftest.py 通过 TOPIC_GARDEN_DB_PATH env var 保证
+        (per-pid 路径, 不污染 repo 根的 db.sqlite3)。
+        """
+        pytest.importorskip("topic_garden")
+        from exam_to_html.backend.pipeline import _ensure_topic_garden_db
+        from exam_to_html.backend._qnum_fallback import extract_drafts_with_lenient_qnum
+        from topic_garden import db as tg_db
+        from topic_garden.models import QuestionDraft
+
+        _ensure_topic_garden_db()
+
+        # 用 UUID 命名 source_paper 保证全局唯一, 跨 run 不撞
+        unique_stem = f"fallback_test_{uuid.uuid4().hex[:12]}"
+
+        # content_md 也用 UUID 防 Jaccard near_dup
+        suffix = uuid.uuid4().hex[:8]
+        fake_drafts = [
+            QuestionDraft(
+                content_md=f"fallback-unique-{suffix}-A 一段独特题干防撞 一",
+                has_figure=False, figure_paths=[],
+                source_page=0, source_qnum="1",
+                q_type="fill_blank", is_multi_select=None,
+                tag_slugs=[], notes=None,
+            ),
+            QuestionDraft(
+                content_md=f"fallback-unique-{suffix}-B 一段独特题干防撞 二",
+                has_figure=False, figure_paths=[],
+                source_page=0, source_qnum="2",
+                q_type="fill_blank", is_multi_select=None,
+                tag_slugs=[], notes=None,
+            ),
+        ]
+        monkeypatch.setattr(
+            "exam_to_html.backend._qnum_fallback._iter_pages_text",
+            lambda pdf_path: [(0, "mock page text")],
+        )
+        monkeypatch.setattr(
+            "exam_to_html.backend._qnum_fallback._build_drafts_from_pages",
+            lambda pages: fake_drafts,
+        )
+
+        pdf = tmp_path / f"{unique_stem}.pdf"
+        pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+        # 1. 兜底函数返 2 个 draft (mock 注入)
+        drafts = extract_drafts_with_lenient_qnum(str(pdf))
+        assert len(drafts) == 2
+
+        # 2. 入库 (unique_stem 保证 0 collision, 不依赖 DB 干净状态)
+        for d in drafts:
+            qid, is_new, sim, reason = tg_db.add_question_with_dedupe(
+                content_md=d.content_md,
+                source_paper=unique_stem,
+                source_qnum=d.source_qnum,
+                source_page=d.source_page,
+                q_type=d.q_type,
+                notes=d.notes,
+            )
+            assert qid is not None and qid > 0
+
+        # 3. 按 unique_stem 查, 至少 2 条
+        rows = list(tg_db.Question.select().where(tg_db.Question.source_paper == unique_stem))
+        assert len(rows) >= 2
+        assert {r.source_qnum for r in rows} >= {"1", "2"}
+
+    def test_convert_pdf_invokes_fallback_when_drafts_zero(self, tmp_path, monkeypatch):
+        """convert_pdf 在 process_inbox 返 drafts=0 时, 必须调用 _qnum_fallback.
+
+        这验证 hook 点是否真的接到了 — 不需要跑完整 compose, 只要兜底函数被调用。
+        """
+        pytest.importorskip("topic_garden")
+        from exam_to_html.backend.pipeline import convert_pdf, _ensure_topic_garden_db
+
+        monkeypatch.chdir(tmp_path)
+        _ensure_topic_garden_db()
+
+        # 1. Mock process_inbox 返 drafts=0
+        def fake_process_inbox(**kwargs):
+            return {
+                "summary": {
+                    "drafts": 0, "inserted": 0, "skipped": 0, "near_dup": 0,
+                    "files_total": 1, "files_completed": 0,
+                    "files_partial": 0, "files_failed": 1,
+                    "failed_questions": 0,
+                },
+                "files": [],
+            }
+        monkeypatch.setattr(
+            "topic_garden.ingest_inbox.process_inbox", fake_process_inbox
+        )
+
+        # 2. Mock _qnum_fallback 返 [] (无 qnum) → 应走 NoQuestionsError, 不 compose
+        # pipeline 里是 local import: from ._qnum_fallback import ...
+        # patch 源模块即可
+        monkeypatch.setattr(
+            "exam_to_html.backend._qnum_fallback.extract_drafts_with_lenient_qnum",
+            lambda pdf_path: [],
+        )
+
+        # 3. PDF + output_dir
+        pdf = tmp_path / "test.pdf"
+        pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+        out = tmp_path / "out"
+        out.mkdir()
+
+        # 4. 期望 NoQuestionsError (因为兜底也返 0)
+        from exam_to_html.errors import NoQuestionsError
+        with pytest.raises(NoQuestionsError) as exc:
+            convert_pdf(pdf_path=pdf, output_dir=out, mode="flash")
+        # drafts=0 + 兜底 0 → 报"扫描版/题号格式非标准"
+        msg = exc.value.message
+        assert ("扫描版" in msg) or ("题号格式" in msg), \
+            f"兜底 0 题时报错消息缺成因提示: {msg}"
