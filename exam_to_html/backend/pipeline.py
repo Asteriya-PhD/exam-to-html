@@ -267,7 +267,12 @@ def convert_pdf(
         {k: summary.get(k) for k in ("drafts", "inserted", "skipped", "near_dup", "files_completed", "files_failed", "files_partial")},
     )
 
-    from topic_garden.db import Question, Topic, add_topic_question, db as tg_db
+    from topic_garden.db import (
+        Question,
+        Topic,
+        add_topic_question,
+        add_question_with_dedupe,
+    )
 
     questions = _with_db_retry(
         lambda: list(
@@ -303,7 +308,7 @@ def convert_pdf(
                 for d in fallback_drafts:
                     try:
                         _with_db_retry(
-                            lambda d=d: tg_db.add_question_with_dedupe(
+                            lambda d=d: add_question_with_dedupe(
                                 content_md=d.content_md,
                                 source_paper=stem,
                                 source_qnum=d.source_qnum,
