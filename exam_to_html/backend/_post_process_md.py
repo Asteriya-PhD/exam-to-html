@@ -52,8 +52,9 @@ _SUBQ_RE = re.compile("|".join(_SUBQ_HINTS))
 _FALLBACK_TYPE = "fill_blank"
 
 # 选项行严格模式 (K2 选项换行 / 真选项边界)
-# - 行首 (允许前置空白) + A-D + . / ． / 、 + 后接内容
-_OPTION_LINE_RE = re.compile(r'^\s*[ABCD][\.．、]\s*\S')
+# - 行首 (允许前置空白) + (可选 (/) + A-D + 可选 )/) + . / ． / 、 + 后接内容
+# - 与 pdf2ppt/_v2_parser.py 的 OPTION_PATTERN 一致 (认 (A) / （A） / A.)
+_OPTION_LINE_RE = re.compile(r"^\s*[（(]?[ABCD][)）]?[.．、\s]\s*\S")
 
 
 def _is_inline_options_line(text: str) -> bool:
@@ -121,7 +122,7 @@ def split_inline_options(content_md: str) -> str:
 #   "A.<选项主体首句>\n<选项主体尾句>\nB.<选项主体首句>\n<选项主体尾句>\n..."
 # 我们要识别"上一选项的尾句"(在下一个 A-D 标签前没有 A./B./C./D. 开头,
 # 且不像题干),并把它合并回上一选项。
-_OPTION_HEAD_RE = re.compile(r"^\s*[ABCD][\.．、]\s*\S")
+_OPTION_HEAD_RE = re.compile(r"^\s*[（(]?[ABCD][)）]?[.．、\s]\s*\S")
 
 
 def _looks_like_option_prose(line: str) -> bool:
@@ -169,67 +170,6 @@ def _looks_like_option_prose(line: str) -> bool:
         )
     )
     return has_latex or has_cjk_punct or has_unit or has_continuation_word
-
-
-def reattach_option_prose(content_md: str) -> str:
-    """修复 Q7-style 选项尾句游离 (从真实 PDF run 发现的 bug)。
-
-    MinerU flash 把选项跨两行的 PDF 抽出后,会出现两种"尾句游离":
-
-    Shape A — 尾句在选项之间:
-        A.<主体首句>
-        <尾句 A>
-        B.<主体首句>
-        ...
-    → 尾句 A 应拼回 A。
-
-    Shape B — 尾句在所有选项之前 (Q7 实际抽取后):
-        [题干]
-        <尾句 A>
-        <尾句 B>
-        A.<主体首句 A>
-        B.<主体首句 B>
-        ...
-    → 尾句 A → A, 尾句 B → B (按出现顺序分配到对应选项)
-    """
-    if not content_md:
-        return content_md
-    lines = content_md.split("\n")
-    out: List[str] = []
-    pending_prose: List[str] = []
-    last_option_idx: Optional[int] = None
-    for line in lines:
-        if _OPTION_HEAD_RE.match(line):
-            out.append(line)
-            new_idx = len(out) - 1
-            if pending_prose:
-                # 判断: 如果上一 out 行是选项 (last_option_idx == new_idx - 1)
-                # → Shape A (prose 拼到上一选项)
-                # 否则 (题干后直接跟 prose) → Shape B (prose 按序分配到 new_idx..)
-                if last_option_idx is not None and last_option_idx == new_idx - 1:
-                    out[last_option_idx] = (
-                        out[last_option_idx].rstrip()
-                        + "".join(pending_prose)
-                    ).strip()
-                else:
-                    for i, prose_line in enumerate(pending_prose):
-                        target_idx = new_idx + i
-                        if target_idx < len(out):
-                            out[target_idx] = (
-                                out[target_idx].rstrip() + prose_line
-                            ).strip()
-                        else:
-                            out[new_idx] = (
-                                out[new_idx].rstrip() + prose_line
-                            ).strip()
-                pending_prose = []
-            last_option_idx = new_idx
-        elif _looks_like_option_prose(line):
-            pending_prose.append(line.strip())
-        else:
-            out.append(line)
-            last_option_idx = None
-    return "\n".join(out)
 
 
 def reattach_option_prose(content_md: str) -> str:

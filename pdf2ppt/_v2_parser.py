@@ -20,6 +20,7 @@ if _env_file.exists():
 from ._phys_text import (
     clean_text_block,
     count_options_outside_formula,
+    extract_options_formula_aware,
     post_process_ocr,
     preprocess_markdown,
 )
@@ -939,6 +940,12 @@ class MinerUParser(BaseParser):
         """将 Markdown 文本解析为 ParsedExam"""
         import re
 
+        # Bug 3 修复: 当外部直接调 _parse_markdown (跳过 __init__/parse)
+        # 时, self._debug_mode 还没被赋值。_split_into_questions 末尾会
+        # 读 self._debug_mode 传给 _reassign_images_by_y_center, 这里兜底。
+        if not hasattr(self, "_debug_mode"):
+            self._debug_mode = False
+
         # 预处理 Markdown
         markdown = preprocess_markdown(markdown)
 
@@ -1161,6 +1168,9 @@ class MinerUParser(BaseParser):
 
     def _parse_content_list(self, content_list: list, page_offset: int = 0) -> ParsedExam:
         """将 MinerU content_list.json 转换为 ParsedExam"""
+        # Bug 3 修复: 兜底 _debug_mode (同 _parse_markdown 注释)
+        if not hasattr(self, "_debug_mode"):
+            self._debug_mode = False
         exam = ParsedExam()
 
         for item in content_list:
@@ -1235,6 +1245,11 @@ class MinerUParser(BaseParser):
         - 避免图片被错误地归入没有引用它的题目
         """
         import re
+
+        # Bug 3 修复: 直接调 _split_into_questions (绕过 __init__/parse)
+        # 时, 末尾 _reassign_images_by_y_center 会读 self._debug_mode, 这里兜底。
+        if not hasattr(self, "_debug_mode"):
+            self._debug_mode = False
 
         SECTION_PATTERN = re.compile(r'^[（(]?[一二三四五六七八九十]+[)）]?[、．.\s]')
         QUESTION_PATTERN = re.compile(r'^(\d{1,3})[\.．、\s]')
@@ -1352,12 +1367,29 @@ class MinerUParser(BaseParser):
                     )
                     remaining = text[match.end():].strip()
                     if remaining:
-                        current_question.blocks.append(ContentBlock(
-                            block_type="text",
-                            content=remaining,
-                            bbox=block.bbox,
-                            page_idx=block.page_idx,
-                        ))
+                        # Q4/Q9-style: MinerU 把 stem + 4 选项合并成单一 text 块
+                        # (例: "4. ... 释放位置是 ( )\n\nA. A点\n\nB. B点\n\nC. O点\n\nD. A、B两点")
+                        # 旧逻辑会把剩余整段作 stem → 4 选项被吞。修复: 检测到剩余含
+                        # A./B./C./D. labels 时,拆出选项,保留纯 stem 部分。
+                        if count_options_outside_formula(remaining) >= 2:
+                            # 公式感知 split: 先按 $...$ 切, 仅在非公式部分拆 A./B./C./D.
+                            stem_only, opts = extract_options_formula_aware(remaining)
+                            for op in opts:
+                                current_question.options.append(post_process_ocr(op))
+                            if stem_only:
+                                current_question.blocks.append(ContentBlock(
+                                    block_type="text",
+                                    content=stem_only,
+                                    bbox=block.bbox,
+                                    page_idx=block.page_idx,
+                                ))
+                        else:
+                            current_question.blocks.append(ContentBlock(
+                                block_type="text",
+                                content=remaining,
+                                bbox=block.bbox,
+                                page_idx=block.page_idx,
+                            ))
                     continue
 
             option_match = OPTION_PATTERN.match(text)
@@ -1366,55 +1398,43 @@ class MinerUParser(BaseParser):
                 if current_question.section_title and "实验" in current_question.section_title:
                     current_question.blocks.append(block)
                     continue
-                # 检查这个文本块是否包含多个选项（用 \n 分隔或直接拼接）
-                lines = text.split('\n')
-                multi_option = False
-                if len(lines) > 1:
-                    opt_lines = [l.strip() for l in lines if l.strip() and OPTION_PATTERN.match(l.strip())]
-                    if len(opt_lines) >= 2:
-                        for ol in opt_lines:
-                            current_question.options.append(post_process_ocr(ol))
-                        multi_option = True
-
-                if not multi_option:
-                    # 选项分割：只在选项字母出现在行首或被空格/标点分隔时才分割
-                    # 不分割 LaTeX 公式内部的字母（如 $\Delta p _ { A } 中的 A）
-                    lines = text.split('\n')
-                    opt_parts = []
-                    for line in lines:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        line = post_process_ocr(line)
-                        if not line:
-                            continue
-                        # 只在选项字母出现在行首时才算作选项
-                        if re.match(r'^[ABCD][．.、\s]', line):
-                            opt_parts.append(line)
-                    if len(opt_parts) >= 2:
-                        for op in opt_parts:
-                            current_question.options.append(op)
-                        multi_option = True
-
-                # 一行多选项挤一行 (e.g. "A. xxx B. yyy C. zzz D. www") —
-                # MinerU content_list 偶尔把 4 选项当一个 text block 返回 (数学试卷 Q9/Q10/Q11 命中)
-                # 用 count_options_outside_formula 排除 LaTeX 公式内的 A./B./C./D. 字母
-                if not multi_option:
-                    opt_count = count_options_outside_formula(text)
-                    if opt_count >= 2:
-                        parts = re.split(r'(?=[ABCD][．.、\s])', text)
-                        for part in parts:
-                            part = part.strip()
-                            if part and re.match(r'^[ABCD][．.、\s]', part):
-                                current_question.options.append(post_process_ocr(part))
-                        multi_option = True
-
-                if not multi_option:
+                # 选项统一拆解 (修复 Q5/Q7/Q10 inline-pollution bug, v2026-07-10)
+                #
+                # 原逻辑先跑 multi-line 分支: 把 \n 分隔的行做 line-prefix 检查,
+                # ≥2 行匹配就直接 append,跳过 inline-split。但 MinerU 把 4 选项
+                # 拆成 "A. ...\nB. ... C. ...\nD. ..." 时,C 嵌在 B 行内,
+                # multi-line 只看到 3 行 → 漏 C 并把 C/D 合并到 B。
+                #
+                # 新逻辑: 用 count_options_outside_formula 数总 label 数,
+                #   - ≥2 → extract_options_formula_aware 一刀切 (公式感知,
+                #          同时覆盖 line-prefix + inline 两种格式)
+                #   - <2 → 整段当单选项
+                opt_count = count_options_outside_formula(text)
+                if opt_count >= 2:
+                    _, opts = extract_options_formula_aware(text)
+                    for op in opts:
+                        current_question.options.append(post_process_ocr(op))
+                else:
                     current_question.options.append(post_process_ocr(text))
                 continue
 
             if current_question:
-                current_question.blocks.append(block)
+                # Q9-style: text 块以 "下列说法正确的是( ) \n A. ... B. ... C. ... D. ..."
+                # 起头, 不匹配 QUESTION/OPTION/SECTION 任一 pattern,
+                # 但含 ≥2 个 A./B./C./D. label → 拆出选项, prose 留作 stem。
+                if count_options_outside_formula(text) >= 2:
+                    stem_only, opts = extract_options_formula_aware(text)
+                    for op in opts:
+                        current_question.options.append(post_process_ocr(op))
+                    if stem_only:
+                        current_question.blocks.append(ContentBlock(
+                            block_type="text",
+                            content=stem_only,
+                            bbox=block.bbox,
+                            page_idx=block.page_idx,
+                        ))
+                else:
+                    current_question.blocks.append(block)
 
         if current_question:
             questions.append(current_question)
