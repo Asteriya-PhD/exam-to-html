@@ -358,9 +358,12 @@ def convert_pdf(
     log.info("[pipeline] created Topic #%d: %s (%d 题)", topic.id, stem, len(questions))
 
     attached = 0
+    total = len(questions)
     for i, q in enumerate(questions, start=1):
+        # topic_garden composer v0.19 按 priority desc 排序 (高 priority 排前).
+        # 第 i 题要让 priority 倒序大 → Q1 priority=total, Q15 priority=1
         try:
-            add_topic_question(topic.id, q.id, role="作业", priority=i)
+            add_topic_question(topic.id, q.id, role="作业", priority=total - i + 1)
             attached += 1
         except Exception as e:
             log.warning("[pipeline] add_topic_question 跳过: qid=%d %s", q.id, e)

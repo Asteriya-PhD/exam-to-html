@@ -423,8 +423,11 @@ T1. T前缀
 0.05 g 假阳"""
         qnums = extract_qnums_from_text(text)
         nums = [n for (_, n) in qnums]
-        assert nums == [1, 2, 1, 1, 1, 1], f"unexpected: {qnums}"
-        # 注意事项 / 满分 / 考试时间 都跳过了, 0.05 g 没误识
+        # 新契约 (M5-3): extract_qnums_from_text 只返回顶级题号,
+        # 子问号 （1）/（2） 不参与顶级题号流, 故只挑出 4 个顶级:
+        #   ① → 1, 第1题 → 1, T1. → 1, 1. → 1 (单调递增全部合法)
+        # 注意事项 / 满分 / 考试时间 跳过, 0.05 g 假阳跳过
+        assert nums == [1, 1, 1, 1], f"unexpected: {qnums}"
 
     def test_extract_returns_empty_for_empty_text(self):
         from exam_to_html.backend._qnum_fallback import extract_qnums_from_text
@@ -444,27 +447,40 @@ T1. T前缀
             assert drafts == []
 
     def test_extract_drafts_chunks_questions_by_qnum(self):
-        """PDF 原文按 qnum 切分, 每段 → 一条 QuestionDraft."""
+        """PDF 原文按顶级 qnum 切分, 每段 → 一条 QuestionDraft.
+
+        新契约 (M5-3): 顶级题号开新题段, 子问号 (1)/(2)/(3) 附在当前顶级题题干,
+        不独立成题. 这修复了 page 1+ 上 11 题下面的 (1)/(2)/(3) 被切成 3 道
+        独立题的 bug.
+        """
         from exam_to_html.backend._qnum_fallback import extract_drafts_with_lenient_qnum
         import unittest.mock as mock
-        # 模拟 PyMuPDF 抽出 (1) 格式的题号
+        # 模拟 PyMuPDF 抽出: 2 道顶级题, 每道有 3 个子问号
         with mock.patch(
             "exam_to_html.backend._qnum_fallback._iter_pages_text",
             return_value=[(0,
                 "注意事项\n"
-                "（1） 第一题题干\n"
-                "继续第一题\n"
-                "（2） 第二题题干\n"
-                "继续第二题\n"
+                "1. 第一题题干\n"
+                "（1） 子问一\n"
+                "（2） 子问二\n"
+                "（3） 子问三\n"
+                "2. 第二题题干\n"
+                "（1） 子问一\n"
+                "（2） 子问二\n"
             )],
         ):
             drafts = extract_drafts_with_lenient_qnum("mock.pdf")
+        # 应该是 2 道顶级题, 子问号附在题干里 (不开新题)
         assert len(drafts) == 2, drafts
-        assert drafts[0].source_qnum == "1"
+        assert drafts[0].source_qnum == "01"  # 零填充, 让字典序 = 数值序
         assert "第一题题干" in drafts[0].content_md
-        assert "继续第一题" in drafts[0].content_md
-        assert drafts[1].source_qnum == "2"
+        assert "（1） 子问一" in drafts[0].content_md
+        assert "（2） 子问二" in drafts[0].content_md
+        assert "（3） 子问三" in drafts[0].content_md
+        assert drafts[1].source_qnum == "02"  # 零填充, 让字典序 = 数值序
         assert "第二题题干" in drafts[1].content_md
+        assert "（1） 子问一" in drafts[1].content_md
+        assert "（2） 子问二" in drafts[1].content_md
         # 卷头注意事项不应被任何题"吞"进来 (它是题号前的内容, 全部丢弃)
         for d in drafts:
             assert "注意事项" not in d.content_md

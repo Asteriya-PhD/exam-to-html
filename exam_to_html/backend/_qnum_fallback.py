@@ -34,11 +34,36 @@ log = logging.getLogger(__name__)
 
 
 # ============================================================
-# 宽松题号正则 (支持 5 类格式)
+# 题号正则 — 顶级 vs 子问号 拆分
 # ============================================================
-# 形如 (1) (1) (1) ① 第1题 T1. Q1. 题1. 1. 1. 1、
-# 关键防护: 末尾 `(?!\d)` 负向先行禁止紧跟数字 (避免 "0.05" / "1.14" 误识别);
-# `\d{1,3}` 限 1-999 防长串实验数据; 中文圈码 ①-⑳ 通过 ord() 映射。
+# 顶级题号: 1. / 1． / 1、 / ① / 第N题 / T1. / Q1. / 题1.
+#   判定: 单调递增 (n > last_top_qnum), 否则视作噪声丢弃
+# 子问号: （1）/ (1) / （2）/ (2) ...
+#   判定: 出现在某个顶级题号 "范围" 内, 不开新题, 仅附到当前顶级题题干末尾
+#
+# 关键防护 (沿用原版):
+#   - 末尾 `(?!\d)` 负向先行禁止紧跟数字 (避免 "0.05" / "1.14" 误识别)
+#   - `\d{1,3}` 限 1-999 防长串实验数据
+#   - 中文圈码 ①-⑳ 通过 ord() 映射
+_TOP_QNUM_RE = re.compile(
+    r"^\s*"
+    r"(?:"
+    r"([①-⑳])"                          # 圈码 ①–⑳
+    r"|第\s*(\d{1,3})\s*题"               # 第1题
+    r"|(?:[TQ]|题)\s*(\d{1,3})[\.．、]"   # T1. / Q1. / 题1.
+    r"|(\d{1,3})[\.．、]"                # 1. / 1． / 1、 (原 PDF2PPT 形式)
+    r")"
+    r"(?!\d)"                             # 防 "1.14" / "0.05" — 题号后不能再是数字
+)
+
+# 子问号正则 — 形如 （1）/(1) — 永远是某个顶级题内的子问
+# 用全角/半角括号都接受 (实际 PDF 两种都常见)
+_SUB_QNUM_RE = re.compile(
+    r"^\s*[（(](\d{1,3})[）)]"
+    r"(?!\d)"
+)
+
+# 兼容旧 API: 旧 _LENIENT_QNUM_RE 仍导出 (供测试 / 外部使用) — 但标记 DEPRECATED
 _LENIENT_QNUM_RE = re.compile(
     r"^\s*"
     r"(?:"
@@ -48,7 +73,7 @@ _LENIENT_QNUM_RE = re.compile(
     r"|(?:[TQ]|题)\s*(\d{1,3})[\.．、]"   # T1. / Q1. / 题1.
     r"|(\d{1,3})[\.．、]"                # 1. / 1． / 1、 (原 PDF2PPT 形式)
     r")"
-    r"(?!\d)"                             # 防 "1.14" / "0.05" — 题号后不能再是数字
+    r"(?!\d)"
 )
 
 # 卷头/说明页常见的提示语 — page 0 上匹配上则当说明处理, 不当题号
@@ -65,17 +90,13 @@ _INSTRUCTION_HINTS = (
 
 
 def _match_qnum(line: str) -> Optional[int]:
-    """单行宽松题号匹配, 返回题号 1-999, 否则 None.
+    """DEPRECATED: 兼容旧 API. 内部用 _match_top_qnum + _match_sub_qnum 替代.
 
-    防止假阳:
-      - 数字后紧跟数字 ("0.05", "1.14") — `(?!\\d)` 负向先行守住
-      - 行内 mid-num ("题 1.2 步骤") — `^\\s*` + 整行 anchor
-      - num > 50 — 多为误识, 试卷很少一卷 50+ 题
+    单行宽松题号匹配, 返回题号 1-999, 否则 None. **不区分顶级/子问** — 新代码不应再用.
     """
     m = _LENIENT_QNUM_RE.match(line)
     if not m:
         return None
-    # 6 个捕获组分别对应 5 种格式 + 1 个 (circle 自身)
     paren, circled, di_ti, tq, plain = m.groups()
     if paren is not None:
         num = int(paren)
@@ -94,8 +115,56 @@ def _match_qnum(line: str) -> Optional[int]:
     return num
 
 
+def _match_top_qnum(line: str) -> Optional[int]:
+    """单行顶级题号匹配. 排除 (N) / [N] 形式的子问号.
+
+    返回题号 1-50 (num > 50 视为噪声). 匹配格式:
+      - 圈码 ①-⑳
+      - 第N题
+      - T1./Q1./题1.
+      - 1./1．/1、
+
+    不匹配 (1) / （1） 这类子问 — 子问需用 _match_sub_qnum.
+    """
+    m = _TOP_QNUM_RE.match(line)
+    if not m:
+        return None
+    circled, di_ti, tq, plain = m.groups()
+    if circled is not None:
+        num = ord(circled) - ord("①") + 1
+    elif di_ti is not None:
+        num = int(di_ti)
+    elif tq is not None:
+        num = int(tq)
+    elif plain is not None:
+        num = int(plain)
+    else:
+        return None
+    if num < 1 or num > 50:
+        return None
+    return num
+
+
+def _match_sub_qnum(line: str) -> Optional[int]:
+    """单行子问号匹配. 形如 （1）/(1).  返回 1-50 的子问号."""
+    m = _SUB_QNUM_RE.match(line)
+    if not m:
+        return None
+    num = int(m.group(1))
+    if num < 1 or num > 50:
+        return None
+    return num
+
+
 def extract_qnums_from_text(text: str) -> List[Tuple[int, int]]:
-    """从纯文本抽 (行号, 题号) 列表, 去重按行号顺序.
+    """从纯文本抽 (行号, 顶级题号) 列表, 去重按行号顺序.
+
+    **只返回顶级题号** — 子问号 (1)/(2)/(3) 不算顶级, 不出现在返回中.
+
+    顶级题号的唯一判定依据是 `_TOP_QNUM_RE` 匹配 + `1 <= num <= 50`,
+    不再做单调性校验 — 同一卷里 `① / 第1题 / T1. / 1.` 都是题号 1 是合法的
+    (题号格式重置但指向"题 1"); 而 `0.05 / 1.14` 这类假阳已被 `_TOP_QNUM_RE`
+    的 `(?!\d)` 负向先行 + `num >= 1` 守住。
 
     Args:
         text: PDF 全文 (按页 \f 或 \n 分隔均可)
@@ -114,7 +183,10 @@ def extract_qnums_from_text(text: str) -> List[Tuple[int, int]]:
             # 仅在该行长度 < 80 时跳过 (避免误伤题中提到"注意事项"的内容)
             if len(stripped) < 80:
                 continue
-        num = _match_qnum(line)
+        # 子问号 (1)/(2)/(3) 不参与顶级题号流 — 后面切片时会附到当前顶级题题干
+        if _match_sub_qnum(line) is not None:
+            continue
+        num = _match_top_qnum(line)
         if num is None:
             continue
         if i in seen_lines:
@@ -158,25 +230,31 @@ def _iter_pages_text(pdf_path: str) -> List[Tuple[int, str]]:
 def _build_drafts_from_pages(pages: List[Tuple[int, str]]):
     """从 (page_idx, text) 列表切出题段, 生成 QuestionDraft.
 
+    **按顶级题号切片** — 子问号 (1)/(2)/(3) 自然附在当前顶级题的题干中,
+    不会独立成题. 这修复了 sample.pdf 上 page 1 把 `（1）/（2）/（3）` 误识
+    为顶级题号 1/2/3, 把 11 题的子问号切成 3 道独立题段的问题.
+
     Lazy import QuestionDraft — 避免 exam-to-html 不需要 topic_garden.models 时
     也强制依赖 (虽然 exam-to-html 总是依赖 topic-garden, 但 lazy import 让本模块
     在测试里能独立跑)。
     """
     from topic_garden.models import QuestionDraft
 
-    # 1) 收集所有 (global_line_idx, page_idx, qnum)
+    # 1) 收集所有 (global_line_idx, page_idx, **顶级** qnum)
+    #    子问号 (_match_sub_qnum) 不参与匹配, 自然落到对应顶级题的题干里
     matches: List[Tuple[int, int, int]] = []
     global_idx = 0
     for pn, text in pages:
         for line in text.splitlines():
-            num = _match_qnum(line)
+            num = _match_top_qnum(line)
             if num is not None:
                 matches.append((global_idx, pn, num))
             global_idx += 1
     if not matches:
         return []
 
-    # 2) 切片: 每题的内容 = 上一个 qnum 行 + 1 到当前 qnum 行 (不含)
+    # 2) 切片: 每题的内容 = 上一个顶级 qnum 行 + 1 到当前顶级 qnum 行 (不含)
+    #    子问号 (1)/(2)/(3) 行自然落在题段内, 不会开新题
     all_lines: List[Tuple[int, str]] = []
     for pn, text in pages:
         for line in text.splitlines():
@@ -184,7 +262,7 @@ def _build_drafts_from_pages(pages: List[Tuple[int, str]]):
 
     drafts = []
     for i, (gline, pn, num) in enumerate(matches):
-        # 题段 = [qnum 行, 下一题 qnum 行) — 包含 qnum 行本身 (题干起点)
+        # 题段 = [顶级 qnum 行, 下一顶级 qnum 行) — 包含顶级 qnum 行本身 (题干起点)
         start = gline
         end = matches[i + 1][0] if i + 1 < len(matches) else len(all_lines)
         body_lines = [ln for (_pn, ln) in all_lines[start:end] if ln.strip()]
@@ -196,7 +274,7 @@ def _build_drafts_from_pages(pages: List[Tuple[int, str]]):
             has_figure=False,
             figure_paths=[],
             source_page=pn,
-            source_qnum=str(num),
+            source_qnum=f"{num:02d}",  # 零填充 → 字典序 = 数值序 (修 composer 反序 bug)
             q_type="fill_blank",  # 兜底没法判定 choice / 计算题
             is_multi_select=None,
             tag_slugs=[],
