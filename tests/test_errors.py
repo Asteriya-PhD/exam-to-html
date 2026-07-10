@@ -409,6 +409,21 @@ class TestQnumFallback:
         assert _match_qnum("2026 年 1 月") is None  # 2026 > 50
         assert _match_qnum("99. 不可能试卷") is None
 
+    def test_accepts_qnum_followed_by_year(self):
+        """M5-5: 真实题号 "6.2024 年12 月" 不能被 `(?!\d)` 误杀 — 4+ 位数字是年份."""
+        from exam_to_html.backend._qnum_fallback import _match_top_qnum
+        assert _match_top_qnum("6.2024 年12 月") == 6
+        assert _match_top_qnum("6.2025") == 6
+        assert _match_top_qnum("11.2024") == 11
+
+    def test_rejects_decimal_with_unit(self):
+        """M5-5: 小数+单位 "1.5m" / "9.8m/s" 不应被误识为题号 (lookahead `(?!\d{1,3}\s?[a-zA-Z])` 守)."""
+        from exam_to_html.backend._qnum_fallback import _match_top_qnum
+        assert _match_top_qnum("1.5m") is None
+        assert _match_top_qnum("9.8m/s") is None
+        assert _match_top_qnum("0.05 g") is None
+        assert _match_top_qnum("3.14 rad") is None
+
     def test_extract_from_mixed_text_skips_instruction_lines(self):
         from exam_to_html.backend._qnum_fallback import extract_qnums_from_text
         text = """注意事项: 请先读题
