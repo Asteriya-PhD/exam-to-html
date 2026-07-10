@@ -79,6 +79,21 @@ pip install -e ".[dev]"
 
 ---
 
+## 兄弟仓状态（CI 依赖）
+
+`.github/workflows/build.yml` 在 CI 上需要 clone 兄弟仓:
+
+| 仓 | 用途 | GH 可达性 | CI 行为 |
+|---|---|---|---|
+| [`Asteriya-PhD/topic_garden_app`](https://github.com/Asteriya-PhD/topic_garden_app) | DB / composer / `process_inbox` | ✅ public | **硬依赖**,失败 → CI fail |
+| `Asteriya-PhD/PDF2PPT` | v3 a3_splitter / chem text (本仓已 vendored v2 parser,理论可选) | ⚠️ 未推 GH (本地开发用) | 软失败,仅 `::warning::`,真 PDF E2E skip |
+
+> 历史教训: 兄弟仓未 push 上 GH 时,CI 在 `Clone sibling repos` 步骤失败
+> (`fatal: could not read Username for 'https://github.com'`)。topic_garden_app
+> 必须 public 后 CI 才能通。
+
+---
+
 ## 设计原则
 
 1. **教师看不到技术细节** —— Python / SQLite / MinerU 全部隐藏在"高级设置"折叠区
