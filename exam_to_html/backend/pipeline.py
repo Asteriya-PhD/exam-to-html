@@ -358,12 +358,12 @@ def convert_pdf(
     log.info("[pipeline] created Topic #%d: %s (%d 题)", topic.id, stem, len(questions))
 
     attached = 0
-    total = len(questions)
     for i, q in enumerate(questions, start=1):
-        # topic_garden composer v0.19 按 priority desc 排序 (高 priority 排前).
-        # 第 i 题要让 priority 倒序大 → Q1 priority=total, Q15 priority=1
+        # exam-to-html 用同一 priority (100) — 让 topic_garden composer v0.19
+        # 按 (priority desc, source_qnum asc) 排序时, source_qnum 主导 (零填充
+        # 过的 sqnum 字典序 = 数值序), 自然按题号顺序展示.
         try:
-            add_topic_question(topic.id, q.id, role="作业", priority=total - i + 1)
+            add_topic_question(topic.id, q.id, role="作业", priority=100)
             attached += 1
         except Exception as e:
             log.warning("[pipeline] add_topic_question 跳过: qid=%d %s", q.id, e)

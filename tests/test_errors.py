@@ -485,6 +485,60 @@ T1. T前缀
         for d in drafts:
             assert "注意事项" not in d.content_md
 
+    def test_extract_drafts_demotes_circled_qnum_after_digit_top(self):
+        """M5-4: 真卷 11 题下面 ①/②/③/④ 实验步骤圈码被识别为顶级题号 — 修复后
+        圈码在见过数字顶级题号后降级为子编号, 落到当前顶级题的题干中."""
+        from exam_to_html.backend._qnum_fallback import extract_drafts_with_lenient_qnum
+        import unittest.mock as mock
+        # 模拟 PyMuPDF 抽出: 11 题 + 4 个圈码子编号 + 12 题
+        with mock.patch(
+            "exam_to_html.backend._qnum_fallback._iter_pages_text",
+            return_value=[(0,
+                "注意事项\n"
+                "11．（8 分）某实验\n"
+                "实验步骤:\n"
+                "①测量两个滑块的质量\n"
+                "②接通气源\n"
+                "③拨动两滑块\n"
+                "④导出传感器数据\n"
+                "则本实验要探究的问题是____。\n"
+                "12．（8 分）下一道题\n"
+                "继续 12 题内容\n"
+            )],
+        ):
+            drafts = extract_drafts_with_lenient_qnum("mock.pdf")
+        # 应该 2 道顶级题 (11 和 12), ①/②/③/④ 应附在 11 题题干中
+        assert len(drafts) == 2, drafts
+        assert drafts[0].source_qnum == "11"
+        assert "①测量两个滑块的质量" in drafts[0].content_md
+        assert "②接通气源" in drafts[0].content_md
+        assert "③拨动两滑块" in drafts[0].content_md
+        assert "④导出传感器数据" in drafts[0].content_md
+        assert drafts[1].source_qnum == "12"
+        assert "下一道题" in drafts[1].content_md
+
+    def test_extract_drafts_accepts_circled_qnum_when_no_digit_top(self):
+        """M5-4 边界: 整张卷子都用圈码顶级 (e.g. ①/②/③/④), 没有数字顶级 —
+        圈码应仍被认作顶级题号, 否则 0 题识别 = 兜底失败."""
+        from exam_to_html.backend._qnum_fallback import extract_drafts_with_lenient_qnum
+        import unittest.mock as mock
+        with mock.patch(
+            "exam_to_html.backend._qnum_fallback._iter_pages_text",
+            return_value=[(0,
+                "① 第一题题干\n"
+                "继续第一题\n"
+                "② 第二题题干\n"
+                "继续第二题\n"
+                "③ 第三题题干\n"
+            )],
+        ):
+            drafts = extract_drafts_with_lenient_qnum("mock.pdf")
+        assert len(drafts) == 3, drafts
+        assert drafts[0].source_qnum == "01"
+        assert "第一题题干" in drafts[0].content_md
+        assert drafts[1].source_qnum == "02"
+        assert drafts[2].source_qnum == "03"
+
 
 # ============================================================
 # 兜底与 pipeline 集成 — PDF2PPT 0 题时, _qnum_fallback 接管

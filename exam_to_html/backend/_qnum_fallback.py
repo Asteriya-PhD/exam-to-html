@@ -76,6 +76,18 @@ _LENIENT_QNUM_RE = re.compile(
     r"(?!\d)"
 )
 
+# 纯数字顶级题号 (无圈码) — 用于圈码降级判定:
+# "见过的数字顶级" 之后再出现 ①/②/③ 应降级为子编号
+_DIGIT_TOP_QNUM_RE = re.compile(
+    r"^\s*"
+    r"(?:"
+    r"第\s*(\d{1,3})\s*题"
+    r"|(?:[TQ]|题)\s*(\d{1,3})[\.．、]"
+    r"|(\d{1,3})[\.．、]"
+    r")"
+    r"(?!\d)"
+)
+
 # 卷头/说明页常见的提示语 — page 0 上匹配上则当说明处理, 不当题号
 _INSTRUCTION_HINTS = (
     "注意事项",
@@ -156,6 +168,30 @@ def _match_sub_qnum(line: str) -> Optional[int]:
     return num
 
 
+def _match_digit_top_qnum(line: str) -> Optional[int]:
+    """单行**纯数字**顶级题号匹配. 排除圈码 ①/②/③.
+
+    用于状态机: 在 _build_drafts_from_pages 中, 一旦见过数字顶级, 后续
+    圈码应降级为子编号 (因为 ①/②/③/④ 在中文物理题里常作为实验步骤 /
+    子问编号, 而不是顶级题号).
+    """
+    m = _DIGIT_TOP_QNUM_RE.match(line)
+    if not m:
+        return None
+    di_ti, tq, plain = m.groups()
+    if di_ti is not None:
+        num = int(di_ti)
+    elif tq is not None:
+        num = int(tq)
+    elif plain is not None:
+        num = int(plain)
+    else:
+        return None
+    if num < 1 or num > 50:
+        return None
+    return num
+
+
 def extract_qnums_from_text(text: str) -> List[Tuple[int, int]]:
     """从纯文本抽 (行号, 顶级题号) 列表, 去重按行号顺序.
 
@@ -165,6 +201,9 @@ def extract_qnums_from_text(text: str) -> List[Tuple[int, int]]:
     不再做单调性校验 — 同一卷里 `① / 第1题 / T1. / 1.` 都是题号 1 是合法的
     (题号格式重置但指向"题 1"); 而 `0.05 / 1.14` 这类假阳已被 `_TOP_QNUM_RE`
     的 `(?!\d)` 负向先行 + `num >= 1` 守住。
+
+    圈码 (M5-4) 注意: 本函数不区分圈码与数字顶级 — 调用方
+    `_build_drafts_from_pages` 用状态机做圈码降级.
 
     Args:
         text: PDF 全文 (按页 \f 或 \n 分隔均可)
@@ -234,21 +273,38 @@ def _build_drafts_from_pages(pages: List[Tuple[int, str]]):
     不会独立成题. 这修复了 sample.pdf 上 page 1 把 `（1）/（2）/（3）` 误识
     为顶级题号 1/2/3, 把 11 题的子问号切成 3 道独立题段的问题.
 
+    圈码 ①/②/③ 处理 (M5-4): 用状态机 — 圈码仅当**尚未见过任何数字顶级题号**
+    时认作顶级 (因为纯圈码顶级卷确实存在, e.g. 整卷用 ①/②/③/④ 编号);
+    一旦见过 `1./11．（8 分）/T1.` 这类数字顶级, 后续圈码降级为子编号
+    (中文物理卷常把 ①/②/③/④ 当实验步骤 / 子问编号).
+
     Lazy import QuestionDraft — 避免 exam-to-html 不需要 topic_garden.models 时
     也强制依赖 (虽然 exam-to-html 总是依赖 topic-garden, 但 lazy import 让本模块
     在测试里能独立跑)。
     """
     from topic_garden.models import QuestionDraft
 
-    # 1) 收集所有 (global_line_idx, page_idx, **顶级** qnum)
+    # 1) 收集所有 (global_line_idx, page_idx, **顶级** qnum) — 状态机
     #    子问号 (_match_sub_qnum) 不参与匹配, 自然落到对应顶级题的题干里
+    #    圈码 (_match_top_qnum 中带 circled 组) 仅在 seen_digit_top=False 时认顶级
     matches: List[Tuple[int, int, int]] = []
     global_idx = 0
+    seen_digit_top = False  # 是否已见过数字顶级题号 — 用于圈码降级
     for pn, text in pages:
         for line in text.splitlines():
-            num = _match_top_qnum(line)
-            if num is not None:
-                matches.append((global_idx, pn, num))
+            # 优先看是不是数字顶级 (任何时候都认)
+            digit_top = _match_digit_top_qnum(line)
+            if digit_top is not None:
+                matches.append((global_idx, pn, digit_top))
+                seen_digit_top = True
+                global_idx += 1
+                continue
+            # 圈码顶级: 仅在尚未见过数字顶级时认 (避免 11 题下 ①/②/③/④ 误识)
+            if not seen_digit_top:
+                circled_top = _match_top_qnum(line)
+                if circled_top is not None:
+                    matches.append((global_idx, pn, circled_top))
+            # seen_digit_top=True 后, 圈码降级为子编号 — 不开新顶级, 自然落到题干
             global_idx += 1
     if not matches:
         return []
