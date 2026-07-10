@@ -90,11 +90,20 @@ pip install -e ".[dev]"
 
 教师电脑装好后会自动检查更新（24h 节流），高级设置里"📦 检查更新"按钮可手动强制检查。
 
-- **version.json 部署在哪**: GitHub Pages，自动 push。`git tag v0.1.0 && git push origin v0.1.0` 触发 workflow deploy 到 `gh-pages` 分支，URL: `https://<user>.github.io/exam-to-html/version.json`
+- **version.json 部署在哪**: GitHub Pages，自动 push。`git tag v0.1.0 && git push origin v0.1.0` 触发 workflow deploy 到 `gh-pages` 分支，URL: `https://Asteriya-PhD.github.io/exam-to-html/version.json`
 - **教师不会自动下载/安装** —— 只在高级设置里提示"🆕 新版本可用"，由教师主动点"前往下载"
 - **首次配置**: 见 [`docs/build-windows.md`](docs/build-windows.md) §A — push 仓到 GH 后 workflow 自动跑
 
 ---
+
+## 最新 release
+
+**v0.1.0** (2026-07-09) · 拖 PDF → 60 秒拿到 HTML 课件
+[Windows .zip](https://github.com/Asteriya-PhD/exam-to-html/releases/download/v0.1.0/exam-to-html-windows.zip) ·
+[macOS .app.zip](https://github.com/Asteriya-PhD/exam-to-html/releases/download/v0.1.0/Exam%20to%20HTML.app.zip) ·
+[Release notes](https://github.com/Asteriya-PhD/exam-to-html/releases/tag/v0.1.0)
+
+> ⚠️ v0.1.0 是 dev tag,build 矩阵首次通跑后会上传实际 .exe/.app artifact。下载前请看 [Actions 页](https://github.com/Asteriya-PhD/exam-to-html/actions) 最新一次 build 状态。
 
 ## License
 
