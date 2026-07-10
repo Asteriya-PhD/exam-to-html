@@ -6,7 +6,8 @@ exam-to-html PyInstaller spec
 打包前必须:
   pip install -e ../topic_garden_app
   pip install -e .[precision]    # 可选, precision 模式
-  pip install -r ../PDF2PPT/requirements.txt  # 真 PDF 解析需要
+
+PDF2PPT v2 parser 子集已 vendored 到本仓 pdf2ppt/，不再需要 ../PDF2PPT。
 """
 import sys
 from pathlib import Path
@@ -57,10 +58,16 @@ a = Analysis(
         'topic_garden.parse_quality',
         'topic_garden.metadata_suggester',
         'topic_garden.question_recommender',
-        # pdf2ppt 动态加载
+        # pdf2ppt 已 vendored 到本仓 (顶层 pdf2ppt/ 包), frozen 模式下 static
+        # analysis 可能漏掉 lazy 引用,这里显式 hidden-import
         'pdf2ppt._v2_parser',
         'pdf2ppt._v2_models',
-        'pdf2ppt._phys_ai',  # pdf-pipeline 间接引用
+        'pdf2ppt._qnum_rule',
+        'pdf2ppt._v3_a3_splitter',
+        'pdf2ppt._katex_renderer',
+        'pdf2ppt._phys_text',
+        'pdf2ppt._phys_postprocess',
+        'pdf2ppt._chem_text',
         # pywebview 平台绑定
         'webview',
         'webview.platforms.cocoa',      # macOS

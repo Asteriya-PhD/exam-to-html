@@ -301,7 +301,7 @@ def convert_pdf(
             fallback_drafts = extract_drafts_with_lenient_qnum(str(pdf_path))
             if fallback_drafts:
                 log.warning(
-                    "[pipeline] PDF2PPT parser 0 题, 兜底正则抽出 %d 题 — %s",
+                    "[pipeline] 本地 pdf2ppt parser 0 题, 兜底正则抽出 %d 题 — %s",
                     len(fallback_drafts), pdf_path.name,
                 )
                 recovered = 0
@@ -348,6 +348,33 @@ def convert_pdf(
                 f"PDF 解析后入库 0 题 (drafts={drafts_total}, inserted={inserted_total}): "
                 f"{pdf_path.name}"
             )
+
+    # K2/K3 题干层归一化 (K2-Q2 ABCD 误切 / K2-Q3 同行 4 选项 / K3-Q3 fill→choice
+    # 错位 / K3-Q5 题型 [?] / 求: 截断 / 跨页图归属) — 必须在 Topic.create 前跑完,
+    # 后续 composer 才能看到修正后的 content_md / q_type / figure_paths。
+    # 不编造 OCR 丢失内容;只规范已有内容。
+    if questions:
+        try:
+            from ._post_process_md import normalize_question_batch
+            normalize_question_batch(questions)
+            # 重新查询一遍,拿到归一化后的字段 (source_qnum / order 保持不变)
+            questions = _with_db_retry(
+                lambda: list(
+                    Question.select().where(
+                        (Question.source_paper == stem)
+                        & (Question.created_at >= started_wallclock)
+                    ).order_by(Question.created_at, Question.source_qnum)
+                )
+            )
+            if not questions:
+                questions = _with_db_retry(
+                    lambda: list(
+                        Question.select().where(Question.source_paper == stem)
+                        .order_by(Question.created_at, Question.source_qnum)
+                    )
+                )
+        except Exception as e:
+            log.warning("[pipeline] post_process_md 跳过: %s", e)
 
     topic = _with_db_retry(
         lambda: Topic.create(

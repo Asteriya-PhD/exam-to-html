@@ -19,7 +19,7 @@ git push -u origin main
 # 在 topic_garden_app 仓目录:
 git remote add origin git@github.com:yourname/topic_garden_app.git
 git push -u origin main
-# PDF2PPT 也最好 push, 不 push 也能 build (只是真 PDF E2E 会 skip)
+# PDF2PPT v2 parser 已随本仓 vendored,无需再单独 push
 ```
 
 **触发方式**:
@@ -60,7 +60,7 @@ exam-to-html-windows.zip
 
 ## 1. 拉仓 + 复用 topic_garden venv
 
-**前提**：你已经在 Windows 上有 `topic_garden_app` 的 venv（且已经装齐 PDF2PPT 全套依赖）。这是教师日常开发的常规 setup，exam-to-html 直接复用即可。
+**前提**：你已经在 Windows 上有 `topic_garden_app` 的 venv。exam-to-html 直接复用即可。
 
 ```powershell
 cd C:\path\to\parent
@@ -81,23 +81,10 @@ pip install -e .[dev]
 pip install -e .[precision]
 ```
 
-> ⚠️ **不用装 PDF2PPT 依赖**：topic_garden_app 的 venv 已经装齐（PyMuPDF / python-pptx / mineru-open-sdk / zhipuai / rapidocr）。如果你的 venv 是新建的，再跑 `pip install -r ..\PDF2PPT\requirements.txt`。
+> ✅ **PDF2PPT v2 parser 已 vendored 到本仓顶层 pdf2ppt/** — 不再需要 `pip install -r ..\PDF2PPT\requirements.txt`,也不需要 `pdf2ppt.pth` 绕过。
+> 验证: `python -c "import pdf2ppt; print(pdf2ppt.__file__)"` 应指向本仓 `pdf2ppt\__init__.py`。
 
-## 3. pdf2ppt.pth (必须)
-
-`process_inbox()` 走的是 `pdf2ppt` 这个兄弟仓, 不是 pip 包。手动加 `.pth`:
-
-```powershell
-# venv site-packages 来自 topic_garden_app (复用的 venv)
-$venv_site = ..\topic_garden_app\.venv\Lib\site-packages
-echo "C:\path\to\parent\PDF2PPT" | Out-File -Encoding ascii "$venv_site\pdf2ppt.pth"
-
-# 验证
-python -c "import pdf2ppt; print(pdf2ppt.__file__)"
-# 应输出: C:\path\to\parent\PDF2PPT\pdf2ppt\__init__.py
-```
-
-## 4. 出 .exe
+## 3. 出 .exe
 
 ```powershell
 pyinstaller pyinstaller.spec
@@ -141,7 +128,7 @@ icon='icons/app.icns',  # 解除注释
 | 风险 | 概率 | 应对 |
 |---|---|---|
 | Python 3.13/3.14 wheel 缺失 (peewee/jinja2) | 中 | 退到 3.12 或 3.11 |
-| pdf2ppt.pth 路径写错 | 高 | 用绝对路径; 测试 `import pdf2ppt` |
+| vendored pdf2ppt 漂移 (本地包被覆盖) | 低 | 升级时重新从 PDF2PPT 兄弟仓 cp; `import pdf2ppt` 验证 |
 | WebView2 缺失 (Win7 / 老 Win10) | 高 | 文档写"仅支持 Win10+", 安装时引导装 Runtime |
 | 360 / 杀毒误报 | 高 | code sign (需要 EV 证书 $300-500/年) |
 | 中文路径乱码 | 低 | paths.py 全部用 pathlib, 文件读写显式 utf-8 |

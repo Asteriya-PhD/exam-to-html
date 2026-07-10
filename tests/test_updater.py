@@ -8,7 +8,7 @@ exam-to-html 自动更新测试 (M5-4)
 - check_update 端到端 (mock fetch_version_json)
 - config last_check_ts 节流持久化
 
-不需要 PDF2PPT / topic_garden 全套依赖, 只要 exam_to_html + 标准库。
+不需要 pdf2ppt / topic_garden 全套依赖, 只要 exam_to_html + 标准库。
 """
 from __future__ import annotations
 

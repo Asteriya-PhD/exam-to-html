@@ -212,7 +212,8 @@ exam-to-html/
 │       ├── server.py               # FastAPI app
 │       ├── routes.py               # /api/convert /api/status /api/config
 │       ├── pipeline.py             # 复用 topic_garden_app 的 process_inbox + compose
-│       └── _qnum_fallback.py       # PDF2PPT 题号正则漏掉的格式兜底（（1）/ ① / 第1题 等）
+│       ├── _qnum_fallback.py       # 本地 pdf2ppt qnum 正则漏掉格式的兜底（（1）/ ① / 第1题 等）
+│       └── _post_process_md.py    # K2/K3 题干层归一化（同行 4 选项拆行 / 选项尾句合并 / 题型归类）
 ├── pyinstaller.spec                # Windows 打包
 ├── pyinstaller.macos.spec          # macOS 打包
 ├── icons/
@@ -317,7 +318,8 @@ exam-to-html/
 
 ### 5.2 NO_QUESTIONS 兜底策略（`_qnum_fallback.py`）
 
-PDF2PPT 的题号正则（`_v2_parser.py:1133`）只支持 `数字 + [.．、 + 空白]`，漏掉 5 类常见格式：
+本仓 vendored 的 `pdf2ppt._v2_parser` 题号正则（`_v2_parser.py:1133`）
+只支持 `数字 + [.．、 + 空白]`,漏掉 5 类常见格式:
 `（1）` / `(1)` / `①–⑳` / `第1题` / `T1. Q1. 题1.`。
 
 **两层处理**（都在 `exam_to_html/backend/pipeline.py:convert_pdf`）：
@@ -327,12 +329,20 @@ PDF2PPT 的题号正则（`_v2_parser.py:1133`）只支持 `数字 + [.．、 + 
    - `inserted=0, drafts>0` → "PDF 已入库（全被 dedup 命中）"
 2. **兜底解析**：仅 `drafts=0` 时触发 `extract_drafts_with_lenient_qnum(pdf_path)`，
    用 PyMuPDF 抽 PDF 全文 + 宽松正则重切题段，走 `add_question_with_dedupe` 入库。
-   零 API 成本（~50ms PyMuPDF），不影响正常 PDF 解析路径。
+   兜底生成的 `q_type` 复用 `_post_process_md.detect_q_type`（不再硬编码
+   `fill_blank`,所以 K3 求:/子问 不会再显示 [?]）。零 API 成本
+   （~50ms PyMuPDF）,不影响正常 PDF 解析路径。
+3. **入库后归一化**：每次 `convert_pdf` 拿到 `questions` 之后,在
+   `Topic.create` 之前跑 `_post_process_md.normalize_question_batch`,
+   修复 K2 同行 4 选项被挤成 1 行 / K3 [?] / 求: 后子问被截 /
+   跨页题图归属。**不补 OCR 丢失内容**,只规范已有内容。
 
 **已知限制**：
-- PyMuPDF（fitz）不在 exam-to-html 自身 venv，依赖 topic_garden 的 venv 提供（见 README 开发说明）。
-- 兜底无法恢复 `section_title` / `is_multi_select`（填 `None`），适用于讲评场景够用。
-- num > 50 视为误识（试卷实际很少超 50 题；超 100 题需要扩上限）。
+- PyMuPDF（fitz）不在 exam-to-html 自身 venv,依赖 topic_garden 的 venv 提供（见 README 开发说明）。
+- 兜底无法恢复 `section_title` / `is_multi_select`（填 `None`）,适用于讲评场景够用。
+- num > 50 视为误识（试卷实际很少超 50 题;超 100 题需要扩上限）。
+- 跨页题图归属与 K3 错位选择题两个已知 bug 仍在 `topic_garden.ingest.figure_recover`
+  和 PDF2PPT v2 parser 中,本仓不直接修,等上游修。
 
 ### 5.3 静默错误（不打扰用户）
 

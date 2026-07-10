@@ -1,27 +1,30 @@
 """
-exam_to_html.backend._qnum_fallback — PDF2PPT qnum 解析失败时的兜底
+exam_to_html.backend._qnum_fallback — 本地 pdf2ppt qnum 解析失败时的兜底
 
 背景
 ----
-PDF2PPT v2 parser (`_v2_parser.py:1133`) 和 qnum rule (`_qnum_rule.py:58`)
-的题号正则只匹配 `数字 + [.．、` + 空白]`, 漏掉:
+本仓 vendored 的 pdf2ppt v2 parser (`pdf2ppt/_v2_parser.py:1133`) 和
+qnum rule (`pdf2ppt/_qnum_rule.py:58`) 的题号正则只匹配
+`数字 + [.．、` + 空白]`, 漏掉:
   - `（1）` / `(1)`
   - `①`–`⑳` (圈码)
   - `第1题`
   - `T1.` / `Q1.` / `题1.`
 
-PDF2PPT 是独立仓, 用户不希望改它; 本模块在 exam-to-html 这层做兜底。
+vendored parser 现在是本仓受控代码 (M5-2),但修改它会回归现有 PDF,
+本模块仍在 exam-to-html 这层做兜底。
 
 策略
 ----
-1. PDF2PPT 解析成功 → 本模块不介入 (零行为变更)。
-2. PDF2PPT 解析返回 0 题 → 用更宽松的正则从 PDF 原文里抽 qnum,
-   把每段题组装成 QuestionDraft, 直接走 db.add_question_with_dedupe 入库。
+1. 本地 pdf2ppt 解析成功 → 本模块不介入 (零行为变更)。
+2. 本地 pdf2ppt 解析返回 0 题 → 用更宽松的正则从 PDF 原文里抽 qnum,
+   把每段题组装成 QuestionDraft, q_type 复用 _post_process_md.detect_q_type
+   (不再硬编码 fill_blank), 直接走 db.add_question_with_dedupe 入库。
 3. PyMuPDF / MinerU 都不在当前 venv → 静默返回 [] (现状: NoQuestionsError)。
 
 兜底的代价
 --------
-PyMuPDF 全文抽 + 正则匹配 ~50ms, 无 API 调用。只有 PDF2PPT 失败的 PDF
+PyMuPDF 全文抽 + 正则匹配 ~50ms, 无 API 调用。只有本地 pdf2ppt 失败的 PDF
 才会走兜底, 频率极低。
 """
 from __future__ import annotations
@@ -29,6 +32,9 @@ from __future__ import annotations
 import logging
 import re
 from typing import List, Optional, Tuple
+
+# 复用 _post_process_md 做 K2/K3 题型判定 (避免硬编码 fill_blank)
+from ._post_process_md import detect_q_type
 
 log = logging.getLogger(__name__)
 
@@ -333,7 +339,9 @@ def _build_drafts_from_pages(pages: List[Tuple[int, str]]):
             figure_paths=[],
             source_page=pn,
             source_qnum=f"{num:02d}",  # 零填充 → 字典序 = 数值序 (修 composer 反序 bug)
-            q_type="fill_blank",  # 兜底没法判定 choice / 计算题
+            # 题型判定:复用 _post_process_md 规则,避免硬编码全部 fill_blank
+            # (历史 bug 让 K3 计算题/含子问题显示 [?])
+            q_type=detect_q_type(content_md, current="fill_blank"),
             is_multi_select=None,
             tag_slugs=[],
             notes=None,
@@ -354,7 +362,7 @@ def extract_drafts_with_lenient_qnum(pdf_path: str):
     drafts = _build_drafts_from_pages(pages)
     if drafts:
         log.info(
-            "[qnum_fallback] PDF2PPT 0 题, 兜底从 PDF 原文抽出 %d 题段",
+            "[qnum_fallback] 本地 pdf2ppt 0 题, 兜底从 PDF 原文抽出 %d 题段",
             len(drafts),
         )
     return drafts

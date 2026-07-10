@@ -215,7 +215,7 @@ def test_orchestration_with_mocked_parser(tmp_path, monkeypatch):
 # ============================================================
 @pytest.mark.skipif(
     not _pdf2ppt_importable(),
-    reason="pdf2ppt + deps 未装 (需 pip install -r PDF2PPT/requirements.txt)",
+    reason="pdf2ppt (vendored) 自身未导入; 真 PDF 解析依赖 PyMuPDF/mineru-open-sdk",
 )
 @pytest.mark.skipif(
     not FIXTURE_PDF.is_file(), reason="fixture PDF missing"

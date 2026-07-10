@@ -353,8 +353,8 @@ class TestNoQuestionsDiagnostic:
 
 # ============================================================
 # 宽松题号兜底 (M5-2 — _qnum_fallback.py)
-# — PDF2PPT 的 QUESTION_PATTERN 漏掉 (1) ① 第1题 T1. 等格式;
-#   本模块在 PDF2PPT 返 0 题时从 PDF 原文按宽松正则重抽。
+# — 本地 pdf2ppt (vendored) 的 QUESTION_PATTERN 漏掉 (1) ① 第1题 T1. 等格式;
+#   本模块在 pdf2ppt 返 0 题时从 PDF 原文按宽松正则重抽。
 # ============================================================
 class TestQnumFallback:
     """_qnum_fallback 单元测试 — 覆盖 5 类题号格式 + 假阳防护。"""
@@ -389,7 +389,7 @@ class TestQnumFallback:
         assert _match_qnum("题3. 第三题") == 3
 
     def test_matches_plain_digit_period(self):
-        """原 PDF2PPT 兼容格式."""
+        """原 pdf2ppt (vendored) 兼容格式."""
         from exam_to_html.backend._qnum_fallback import _match_qnum
         assert _match_qnum("1. 普通题号") == 1
         assert _match_qnum("12． 全宽句点") == 12
@@ -556,7 +556,7 @@ T1. T前缀
 
 
 # ============================================================
-# 兜底与 pipeline 集成 — PDF2PPT 0 题时, _qnum_fallback 接管
+# 兜底与 pipeline 集成 — 本地 pdf2ppt 0 题时, _qnum_fallback 接管
 # ============================================================
 class TestQnumFallbackPipelineHook:
     """convert_pdf 在 process_inbox 返 drafts=0 时, 应调用 _qnum_fallback 兜底."""

@@ -47,8 +47,11 @@ HTML 课件包含：
 
 ```bash
 # 方式 A (推荐): 复用 topic_garden_app/.venv
-# topic_garden 的 venv 已经装齐 PDF2PPT 全套依赖 (PyMuPDF / python-pptx /
-# mineru-open-sdk / zhipuai / rapidocr), 真 PDF 解析可直接跑。
+# 真 PDF 解析依赖 topic_garden 的 venv 提供 PyMuPDF (图片提取) 和
+# mineru-open-sdk (precision 模式)。其它如 python-pptx / zhipuai / rapidocr
+# 已不再被 PDF2PPT v2 parser 引用。
+# PDF2PPT v2 parser 子集已 vendored 到本仓顶层 pdf2ppt/,
+# `from pdf2ppt...` 命中本地包,不需要 ../PDF2PPT 兄弟仓。
 source ../topic_garden_app/.venv/bin/activate     # Mac/Linux
 # 或: ..\topic_garden_app\.venv\Scripts\Activate.ps1   # Win
 
@@ -60,12 +63,12 @@ python -m exam_to_html                           # 启动 GUI
 pyinstaller pyinstaller.spec
 
 # ---
-# 方式 B: 全新独立 venv (需另外装 PDF2PPT 依赖)
+# 方式 B: 全新独立 venv
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ../topic_garden_app
 pip install -e ".[dev]"
-pip install -r ../PDF2PPT/requirements.txt       # 仅方式 B 需要
+# 无需再 pip install -r ../PDF2PPT/requirements.txt — 解析器已随本仓 vendored。
 ```
 
 详见 [`docs/distribution-design.md`](docs/distribution-design.md) 第 9 节里程碑。

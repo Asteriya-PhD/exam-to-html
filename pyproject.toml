@@ -25,7 +25,11 @@ classifiers = [
     "Topic :: Education",
 ]
 
-# topic-garden 是兄弟仓, 装在 ../topic_garden_app/. dev 模式按 README 步骤:
+# topic-garden 仍是兄弟仓 (DB / composer 依赖)；
+# PDF2PPT v2 parser 子集已 vendored 到本仓顶层 pdf2ppt/,
+# topic_garden.ingest 的 `from pdf2ppt...` 会命中本地包,
+# 不再需要 `pip install -e ../PDF2PPT`。
+# dev 模式按 README 步骤:
 #     pip install -e ../topic_garden_app
 # 然后再 `pip install -e .` 或 `pip install -e ".[dev]"`。
 # PyInstaller frozen 模式: 打包前确保 topic-garden 已装进同一 venv。
@@ -57,7 +61,7 @@ exam-to-html = "exam_to_html.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["exam_to_html*"]
+include = ["exam_to_html*", "pdf2ppt*"]
 
 [tool.setuptools.package-data]
 "exam_to_html.gui" = ["static/*.html", "static/*.css", "static/*.js"]
