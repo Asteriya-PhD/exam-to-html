@@ -28,7 +28,7 @@ def test_local_pdf2ppt_package_is_used():
     """`import pdf2ppt` 必须解析到本仓 vendored 包,不是 ../PDF2PPT。"""
     import pdf2ppt
     p = Path(pdf2ppt.__file__).resolve()
-    worktree = Path("/Users/zhewenliu/Claude/exam-to-html").resolve()
+    worktree = Path(__file__).resolve().parents[2]
     # worktree 自身或其下任一 worktree
     assert str(p).startswith(str(worktree)), \
         f"pdf2ppt 解析到非本仓路径: {p}"

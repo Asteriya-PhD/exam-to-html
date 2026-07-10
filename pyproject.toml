@@ -50,6 +50,7 @@ precision = [
 ]
 dev = [
     "pytest>=7.0",
+    "httpx2>=0.0.1",   # starlette.testclient 0.48+ 强制要求 httpx2, 不再吃 httpx
 ]
 
 [project.scripts]
