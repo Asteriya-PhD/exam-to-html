@@ -51,6 +51,11 @@ precision = [
 dev = [
     "pytest>=7.0",
     "httpx2>=0.0.1",   # starlette.testclient 0.48+ 强制要求 httpx2, 不再吃 httpx
+    # CI smoke E2E (test_convert_pdf_real_pdf) 走 vendored pdf2ppt.MinerUParser,
+    # 它的 _get_client() 调 `from mineru import MinerU` — flash 模式也走该路径。
+    # MinerU SDK 又依赖 PyMuPDF 抽页; 没这俩, 真实 PDF 必返 drafts=0。
+    "mineru-open-sdk>=0.2.5",   # MinerU.flash_extract / precision 入口
+    "pymupdf>=1.24",            # pdf2ppt / _qnum_fallback 抽 PDF 全文
 ]
 
 [project.scripts]

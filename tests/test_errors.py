@@ -10,6 +10,7 @@ exam-to-html 错误处理测试 (M3-4)
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import time
 import uuid
@@ -95,6 +96,10 @@ class TestPreflight:
             _preflight(big, tmp_path)
         assert exc.value.code == "TOO_LARGE"
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Windows 不执行 POSIX chmod 0o000 (CI runner 是 Admin, 仍可写),无法触发 OutputPermissionError",
+    )
     def test_output_denied_raises(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         from exam_to_html.backend.pipeline import _preflight
