@@ -21,18 +21,27 @@ _INLINE_OPT_SPLIT = re.compile(r'(?<![A-Za-z}])(\b[ABCD][\.．、]\s)')
 
 # 题型判定的关键字 (K3/K2 物理卷)
 _CALCULATION_HINTS = ("求:", "求：", "计算:", "计算：", "试求", "试求：")
-# 实验题特征 (Q11/Q12 模式: "利用...实验"/"实验得到"/"图甲"/"图乙" + 物理量填空)
-_EXPERIMENT_HINTS = (
-    "利用单摆",
+# 实验题特征 — 只匹配**强实验语境**,避免"利用X作为Y"(描述物理装置)误触发
+_STRONG_EXPERIMENT = (
+    "利用单摆测",        # "利用单摆测重力加速度"
     "实验得到",
     "实验中",
-    "如图甲",
-    "如图乙",
     "用游标卡尺",
     "用秒表",
     "实验步骤",
     "实验数据",
 )
+# 弱实验信号 — 单独出现不算,需配合"测/量/数据/实验"等强词
+_WEAK_EXPERIMENT = ("利用", "如图甲", "如图乙")
+# 强实验词 — 必须是实验操作短语,不是一般物理术语
+# "量" 单独出现不能用 — "质量/动量" 是一般物理术语,不是实验信号
+_EXPERIMENT_STRONG_PHRASES = (
+    "测量", "测得", "测出", "量得",  # 测量操作
+    "实验", "摆长", "周期", "游标卡尺",  # 实验装置/过程
+    "记录", "数据", "秒表", "米尺",  # 实验数据/工具
+)
+# 分值标记 (X分) — 强计算题信号,不单独用,但可覆盖实验误判
+_SCORE_MARKER_RE = re.compile(r"[（(]\s*\d+\s*分\s*[）)]")
 _SUBQ_HINTS = (
     r"[（(]\s*[1-9]\d?\s*[)）]",   # (1) (2) (3) / （1）
     r"第\s*[一二三四五六七八九十]+\s*问",  # 第一问 / 第二问
@@ -320,10 +329,11 @@ def detect_q_type(content_md: str, current: Optional[str] = None) -> str:
     优先级 (保守, 不会把已知 choice 改掉):
     1. 已有合法 choice → 'choice'
     2. 实验题特征 (图甲/图乙/利用 ... 实验/用游标卡尺/用秒表) → 'experiment'
-    3. 含 `求:` / `计算:` / `试求` + 子问号 (1)(2)(3) → 'calculation'
-    4. 含 (1)/(2)/(3) 子问号 (无 choice 标签) → 'calculation'
-    5. 已是 fill_blank / calculation / experiment → 保留
-    6. 兜底 → 'fill_blank' (避免 unknown 触发 [?])
+    3. 分值标记 (X分) → 'calculation' (覆盖实验误判)
+    4. 含 `求:` / `计算:` / `试求` + 子问号 (1)(2)(3) → 'calculation'
+    5. 含 (1)/(2)/(3) 子问号 (无 choice 标签) → 'calculation'
+    6. 已是 fill_blank / calculation / experiment → 保留
+    7. 兜底 → 'fill_blank' (避免 unknown 触发 [?])
     """
     if not content_md:
         return current or _FALLBACK_TYPE
@@ -332,32 +342,47 @@ def detect_q_type(content_md: str, current: Optional[str] = None) -> str:
     opt_lines = [l for l in text.splitlines() if _OPTION_LINE_RE.match(l)]
     if len(opt_lines) >= 2 and _looks_like_real_options(opt_lines):
         return "choice"
-    # 2) 实验题判定: 必须在 calculation 之前 — 实验题常有 (1)(2)(3) 子问,
-    #    但语境是"实验数据 / 实验现象",不是"求答案"
+    # 2) 实验题判定
     if _is_experiment_text(text):
         return "experiment"
-    # 3) 计算题判定
+    # 3) 分值标记 (X分) — 计算题强信号 (覆盖"如图甲"误判)
+    if _SCORE_MARKER_RE.search(text):
+        return "calculation"
+    # 4) 计算题判定
     if _has_calc_hint(text):
         return "calculation"
-    # 4) 子问号
+    # 5) 子问号
     if _SUBQ_RE.search(text):
         return "calculation"
-    # 5) 已有题型保留
+    # 6) 已有题型保留
     if current in ("choice", "fill_blank", "calculation", "experiment"):
         return current
-    # 6) 兜底
+    # 7) 兜底
     return _FALLBACK_TYPE
 
 
 def _is_experiment_text(text: str) -> bool:
     """实验题特征判定 (Q11/Q12 模式)。
 
-    至少满足 1 个强特征即可。强特征: "利用 <物理装置>"/"实验中"/"图甲"/"图乙"
-    /"用游标卡尺"/"用秒表"/"实验数据"等。
+    策略 (v0.20 修复 Bug A):
+    1. 强实验信号命中 → experiment (如"用游标卡尺"/"用秒表"/"利用单摆测")
+    2. 弱信号 ("利用"/"如图甲/乙") 单独不触发 — 需配合"测/量/数据"等强词
+    3. 分值标记 "(X分)" 通常出现在计算题, 可覆盖弱实验信号
     """
     if not text:
         return False
-    return any(h in text for h in _EXPERIMENT_HINTS)
+    # 1) 强实验信号
+    if any(h in text for h in _STRONG_EXPERIMENT):
+        return True
+    # 2) 弱信号 + 强实验词
+    has_weak = any(h in text for h in _WEAK_EXPERIMENT)
+    has_strong_phrase = any(w in text for w in _EXPERIMENT_STRONG_PHRASES)
+    if has_weak and has_strong_phrase:
+        return True
+    # 3) 分值标记 (X分) → 计算题, 反驳 experiment
+    if _SCORE_MARKER_RE.search(text):
+        return False
+    return False
 
 
 def _looks_like_real_options(options) -> bool:
@@ -426,6 +451,23 @@ def normalize_figure_paths(figure_paths) -> List[str]:
     return seen
 
 
+def _clean_ocr_noise(text: str) -> str:
+    """清理 OCR 噪声 — 纯数字/字母短串插入在选项/题干文本中。
+
+    典型: "小球的速度 00000000000 O0" → "小球的速度"
+    策略: 匹配行内独立的纯数字 (≥4位) + 可选单字母后缀,替换为空。
+    不影响正常物理量如 "97.43cm" (有单位) 或 "1.5m" (有小数点+单位)。
+    """
+    if not text:
+        return text
+    # 清理纯数字垃圾 (≥4位连续数字, 或连续0, 不跟单位)
+    # 例: "00000000000 O0", "0000", "12345"
+    text = re.sub(r'\s+\d{4,}\s*[A-Z]?\d*\s*', ' ', text)
+    # 合并多余空格
+    text = re.sub(r' {2,}', ' ', text)
+    return text.strip()
+
+
 def normalize_question_record(
     *,
     content_md: str,
@@ -439,6 +481,7 @@ def normalize_question_record(
     new_content = preserve_subquestions_after_qiu(content_md)
     new_content = reattach_option_prose(new_content)
     new_content = split_inline_options(new_content)
+    new_content = _clean_ocr_noise(new_content)
     new_type = detect_q_type(new_content, current=q_type)
     new_figs = normalize_figure_paths(figure_paths)
     return {

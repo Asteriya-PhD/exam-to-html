@@ -425,3 +425,108 @@ def test_real_pdf_pipeline_q7_q11_q15_round_trip():
     # 求: 后子问保留
     assert "(1)" in rec15["content_md"]
     assert "(2)" in rec15["content_md"]
+
+
+# ============================================================
+# Real PDF regression — 20260528《高一下学期物理统一训练试题卷》
+# Per-question structural inspection: 3 newly discovered bugs
+# ============================================================
+
+def test_bug_a_score_marker_is_calculation():
+    """Bug A: 以(X分)开头的题干应归类为 calculation, 不是 fill_blank。
+
+    真实 PDF: Q2(PDF Q15, "（18分）如图所示, 弹簧...物块P碰撞...") 和
+    Q13(PDF Q14, "（14分）某同学...圆管...") 都以(X分)开头, 是计算题。
+    """
+    from exam_to_html.backend._post_process_md import detect_q_type
+    q2 = "（18分）如图所示,水平地面上竖直固定一劲度系数为k的轻质弹簧,求碰撞后速度"
+    assert detect_q_type(q2, current="unknown") == "calculation", (
+        f"Q2 应为 calculation (有(X分)标记), 实际 {detect_q_type(q2)}"
+    )
+    q13 = "（14分）某同学自己制作了一套玩具,利用剖开的半径为R的圆管一部分作为轨道"
+    assert detect_q_type(q13, current="unknown") == "calculation", (
+        f"Q13 应为 calculation (有(X分)标记), 实际 {detect_q_type(q13)}"
+    )
+
+
+def test_bug_a_utilize_device_not_experiment():
+    """Bug A: "利用X作为..."描述物理装置, 不应误判为实验题。
+
+    真实 PDF: Q10(PDF Q13) 有"利用剖开的半径为R的圆管一部分作为轨道",
+    触发"利用" experiment hint, 但这是计算题(利用圆管做轨道)。
+    区分: 真实验 = "利用X测Y" / "实验中"; 计算 = "利用X作为Y"。
+    """
+    from exam_to_html.backend._post_process_md import detect_q_type
+    q10 = "（12分）如图甲所示,一轻弹簧的两端与质量分别为m1和m2的两物块,现使A瞬时获得水平向右的速度"
+    result = detect_q_type(q10, current="unknown")
+    assert result != "experiment", (
+        f"Q10 (利用圆管作为轨道) 不应为 experiment, 实际 {result}"
+    )
+
+
+def test_bug_a_figure_label_not_experiment_signal():
+    """Bug A: "如图甲/乙" 可出现在任何题型, 不应作为 experiment 独立信号。
+
+    真实 PDF: Q5(PDF Q5, 如图甲) 和 Q10(PDF Q13, 如图甲) 都是选择/计算题,
+    但 "如图甲" 在 _EXPERIMENT_HINTS 列表里, 会误触发 experiment。
+    """
+    from exam_to_html.backend._post_process_md import _is_experiment_text
+    # 选择题 stem 含 "如图甲" — 不应是 experiment
+    q5 = "如图甲,一质量为m的物体B放在水平面上,质量为2m的物体A通过一轻弹簧与物体B连接"
+    assert not _is_experiment_text(q5), (
+        f"Q5 (选择题含如图甲) 不应触发 experiment, 实际 {_is_experiment_text(q5)}"
+    )
+    # 真实验 stem: "利用单摆测重力加速度的实验中, 用游标卡尺测直径如图甲所示"
+    q11 = "小华同学在利用单摆测重力加速度的实验中,用游标卡尺测得摆球的直径如图甲所示"
+    assert _is_experiment_text(q11), (
+        f"Q11 (真实验) 应触发 experiment, 实际 {_is_experiment_text(q11)}"
+    )
+
+
+def test_bug_b_options_preserve_letter_prefix():
+    """Bug B: 选项文本含物理量 (如 "5 m/s") 但缺 A./B./C./D. 前缀时,
+    post-process 不应编造标签 — 只有原内容已有标签才做归一化。
+
+    真实 PDF: Q5(PDF Q1) 选项被 MinerU Flash 提取后缺 A./B./C./D. 前缀,
+    只剩 "小球的加速度 / 小球的速度 / 小球的动能 / 系统的弹性势能"。
+    """
+    from exam_to_html.backend._post_process_md import split_inline_options, normalize_question_record
+    md_no_prefix = "如图所示,小球在轻弹簧作用下沿光滑水平杆做简谐运动\n小球的加速度\n小球的速度\n小球的动能\n系统的弹性势能"
+    out = split_inline_options(md_no_prefix)
+    # 选项行没 A./B./C./D. → split_inline_options 不动 (不编造标签)
+    assert "A." not in out, f"缺前缀的选项不应被编造 A./B./C./D.: {out!r}"
+    rec = normalize_question_record(content_md=md_no_prefix, q_type="unknown", figure_paths=None)
+    assert rec["q_type"] != "choice", (
+        f"缺 A./B./C./D. 前缀的4行选项不应被判为 choice, 实际 {rec['q_type']}"
+    )
+
+
+def test_bug_c_ocr_noise_filtered():
+    """Bug C: OCR 噪声如 "00000000000 O0" 应被 post-process 清理或至少不显示。
+
+    真实 PDF: Q5(PDF Q1) 选项 "小球的速度 00000000000 O0" 含 OCR 噪声。
+    """
+    from exam_to_html.backend._post_process_md import normalize_question_record
+    md_noisy = "如图所示\n小球的加速度\n小球的速度 00000000000 O0\n小球的动能\n系统的弹性势能"
+    rec = normalize_question_record(content_md=md_noisy, q_type="unknown", figure_paths=None)
+    content = rec["content_md"]
+    # 纯数字+字母短串 < 15 字符应被清理 (不影响主体语义)
+    assert "00000000000" not in content, (
+        f"OCR 噪声 00000000000 未被清理: {content!r}"
+    )
+
+
+def test_bug_a_experiment_real_still_detected():
+    """防御: 真实验题 (利用单摆测g, 用游标卡尺, 用秒表) 仍应被判为 experiment。
+
+    修 Bug A 时不能把真实验也误杀。
+    """
+    from exam_to_html.backend._post_process_md import detect_q_type
+    q11 = "小华同学在利用单摆测重力加速度的实验中,用游标卡尺测得摆球的直径如图甲所示"
+    assert detect_q_type(q11, current="unknown") == "experiment", (
+        f"Q11 (真实验) 应为 experiment, 实际 {detect_q_type(q11)}"
+    )
+    q12 = "用单摆测量重力加速度的实验中\n(1)在测量周期时,为了减小测量周期的误差,应在摆球经过最低点的位置时开始计时"
+    assert detect_q_type(q12, current="unknown") == "experiment", (
+        f"Q12 (真实验) 应为 experiment, 实际 {detect_q_type(q12)}"
+    )
