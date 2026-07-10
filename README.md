@@ -4,8 +4,8 @@
 
 **目标用户**：懂物理不懂代码的高中物理教师。
 **形态**：Windows 单文件 .exe（macOS 顺带）。
-**当前进度**：🔨 M1 骨架完工 + CI 自动 build（Win/Mac）
-[![Build](https://github.com/yourname/exam-to-html/actions/workflows/build.yml/badge.svg)](https://github.com/yourname/exam-to-html/actions/workflows/build.yml)
+**当前进度**：🔨 跨平台 CI + 真 PDF 兜底硬化中
+[![Build](https://github.com/Asteriya-PhD/exam-to-html/actions/workflows/build.yml/badge.svg)](https://github.com/Asteriya-PhD/exam-to-html/actions/workflows/build.yml)
 
 ---
 
@@ -27,9 +27,13 @@ HTML 课件包含：
 
 | 阶段 | 状态 |
 |---|---|
-| 设计文档 | ✅ [`docs/distribution-design.md`](docs/distribution-design.md) |
-| 骨架 | ⏳ 待开工（M1） |
-| UI 打磨 | ⏸ 待开工（M2） |
+| M0 设计文档 | ✅ [`docs/distribution-design.md`](docs/distribution-design.md) |
+| M1 骨架 | ✅ `2f78398` |
+| M2 UI 打磨 | ✅ `182cb36` 暖橙 Workbench |
+| M3 讲评模板 | ✅ `4479b39` 单页式 + 侧边导航 |
+| M4 跨平台出包 | ✅ CI 双矩阵 (Win/Mac) + `pyinstaller.spec` |
+| M5 兜底解析 | ✅ `_qnum_fallback` + K2/K3 归一化 (89/89 + 434/434 测试) |
+| 真 PDF 硬化 | 🔨 7/10 持续（标签/OCR/选项前缀边界 case） |
 | v1.0 发布 | 🎯 暑假内 |
 
 ---

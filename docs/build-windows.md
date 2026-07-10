@@ -12,12 +12,12 @@
 # 一次性 setup
 gh repo create exam-to-html --public --source=. --push    # macOS/Linux
 # 或在 GH 网页上创建空 repo, 然后:
-git remote add origin git@github.com:yourname/exam-to-html.git
+git remote add origin git@github.com:Asteriya-PhD/exam-to-html.git
 git push -u origin main
 
 # 兄弟仓也要 push (workflow 依赖)
 # 在 topic_garden_app 仓目录:
-git remote add origin git@github.com:yourname/topic_garden_app.git
+git remote add origin git@github.com:Asteriya-PhD/topic_garden_app.git
 git push -u origin main
 # PDF2PPT v2 parser 已随本仓 vendored,无需再单独 push
 ```

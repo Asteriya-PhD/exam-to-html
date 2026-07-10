@@ -36,7 +36,7 @@ log = logging.getLogger(__name__)
 # 默认 version.json URL (GH Pages)
 # 用户应 push 到自己的 GH user / org 后, 通过环境变量或 config 覆盖
 DEFAULT_VERSION_URL = (
-    "https://yourname.github.io/exam-to-html/version.json"
+    "https://Asteriya-PhD.github.io/exam-to-html/version.json"
 )
 
 # 节流间隔 (24h)
@@ -46,7 +46,7 @@ THROTTLE_HOURS = 24
 HTTP_TIMEOUT = 5.0
 
 # User-Agent (GH Pages 会按 UA 区分流量)
-USER_AGENT = f"exam-to-html/{__version__} (+https://github.com/yourname/exam-to-html)"
+USER_AGENT = f"exam-to-html/{__version__} (+https://github.com/Asteriya-PhD/exam-to-html)"
 
 
 # ============================================================

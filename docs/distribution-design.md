@@ -165,7 +165,7 @@ name = "exam-to-html"
 version = "1.0.0"
 requires-python = ">=3.11"
 dependencies = [
-    "topic-garden-app @ git+ssh://git@github.com/yourname/topic_garden_app.git@v0.18.4",
+    "topic-garden-app @ git+ssh://git@github.com/Asteriya-PhD/topic_garden_app.git@v0.18.4",
     # 或本地开发: "topic-garden-app @ file://../topic_garden_app",
     "pywebview>=4.4",
     "fastapi>=0.110",
@@ -408,7 +408,7 @@ PDF 解析结果用 system-ui 字体，跨平台 fallback：
 [读 %APPDATA%/exam-to-html/config.json: last_check_ts]
     │
     │ if (now - last_check_ts) > 24h:
-    │   GET https://exam-to-html.yourname.com/version.json
+    │   GET https://exam-to-html.Asteriya-PhD.com/version.json
     │   {
     │     "latest_version": "1.2.0",
     │     "current_version": "1.0.0",

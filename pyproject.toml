@@ -56,8 +56,8 @@ dev = [
 exam-to-html = "exam_to_html.__main__:main"
 
 [project.urls]
-"Homepage" = "https://github.com/yourname/exam-to-html"
-"topic-garden" = "https://github.com/yourname/topic_garden_app"
+"Homepage" = "https://github.com/Asteriya-PhD/exam-to-html"
+"topic-garden" = "https://github.com/Asteriya-PhD/topic_garden_app"
 
 [tool.setuptools.packages.find]
 where = ["."]

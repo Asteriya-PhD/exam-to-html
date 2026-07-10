@@ -177,7 +177,7 @@ jobs:
   # ============================================================
   # Deploy version.json → gh-pages (设计文档 §7.2)
   #   仅 tag 触发, 用最新 tag version 渲染 version.json 推到 gh-pages
-  #   教师 app 启动时 GET https://yourname.github.io/exam-to-html/version.json
+  #   教师 app 启动时 GET https://Asteriya-PhD.github.io/exam-to-html/version.json
   # ============================================================
   deploy-version:
     name: Deploy version.json → gh-pages
