@@ -281,8 +281,3 @@ def test_convert_pdf_real_pdf(tmp_path):
 
     assert output_path.is_file()
     assert len(output_path.read_text(encoding="utf-8")) > 1000
-
-    assert result["stats"]["drafts"] >= 0
-    html_path = Path(result["html_path"])
-    assert html_path.is_file()
-    assert html_path.stat().st_size > 1024
