@@ -20,8 +20,26 @@ TG_REPO = TG_PKG.parent.parent  # src/topic_garden/ → src/ → repo root
 # 兜底: 兼容 flat layout (旧版本 topic_garden 把模板/图放在 repo 根)
 if not (TG_REPO / 'templates').exists():
     TG_REPO = TG_PKG.parent  # flat layout: topic_garden/ → repo root
-TG_TEMPLATES = TG_REPO / 'templates'
-TG_IMAGES = TG_REPO / 'courseware' / 'images'
+
+# 修 CI PyInstaller fail: courseware/images 是 topic_garden 运行时产物,
+# 被 gitignore, CI clone 后目录不存在 — 用 .exists() 过滤掉, 缺失仅 warn。
+def _opt_data(src_rel: str, dst: str):
+    """仅当 src 存在时返回 datas 元组, 否则返回 None (供 filter 排除)。"""
+    src = TG_REPO / src_rel
+    if src.exists():
+        return (str(src), dst)
+    print(f"[spec] skip data: {src} 不存在 (CI clone 时常因 gitignore 缺失)")
+    return None
+
+_datas = [
+    # exam-to-html 的 GUI 静态文件
+    ('exam_to_html/gui/static', 'exam_to_html/gui/static'),
+    # topic_garden 的 Jinja 模板 (composer 渲染用) — 缺失时仅 warn
+    _opt_data('templates', 'topic_garden/templates'),
+    # topic_garden 的 courseware/images (figure_paths 引用此目录) — 同上
+    _opt_data('courseware/images', 'courseware/images'),
+]
+datas = [d for d in _datas if d is not None]
 
 block_cipher = None
 
@@ -32,16 +50,6 @@ a = Analysis(
         str(TG_REPO / 'src' / 'topic_garden'),
     ],
     binaries=[],
-    datas=[
-        # exam-to-html 的 GUI 静态文件
-        ('exam_to_html/gui/static', 'exam_to_html/gui/static'),
-        # topic_garden 的 Jinja 模板 (composer 渲染用) — 缺失时仅 warn
-        (str(TG_TEMPLATES), 'topic_garden/templates'),
-        # topic_garden 的 courseware/images (figure_paths 引用此目录) — 同上
-        (str(TG_IMAGES), 'courseware/images'),
-        # inbox/archive 空目录占位 (避免 frozen 模式下空目录问题)
-        # PyInstaller 不打包空目录, 但运行时 %APPDATA% 自动 mkdir
-    ],
     hiddenimports=[
         # exam_to_html 自身子模块 (PyInstaller 静态分析可能漏掉 string import)
         'exam_to_html',
