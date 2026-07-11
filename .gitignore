@@ -55,3 +55,4 @@ assets/
 # 凭证
 .env
 .env.local
+output/
