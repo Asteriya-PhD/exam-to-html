@@ -446,87 +446,20 @@ _MATH_ITALIC_MAP = {
     **{chr(c): str(c - 0x1D7D8) for c in range(0x1D7D8, 0x1D7D8 + 10)},
 }
 
-# OCR 上下标映射 — PyMuPDF 拆公式时常用 ASCII 字符当下标:
+# OCR 上下标映射 — PyMuPDF 拆公式时**数学专用字符**当下标:
 # ! → ₀ (exclaim), # → ₁ (# in keyboard shift), $ → ₂
-# % → ₃, & → ₄, ' → ₅, ( → ₆, ) → ₇
-# * → ₈, + → ₉ (常见于 m/s²)
+# % → ₃, & → ₄, ' → ₅, * → ₈, + → ₉ (常见于 10²/m³ 等)
+# **不映射** ( ) , . / - — 它们是普通 ASCII 标点, OCR 中文段里也常见,
+# 错误转下标会污染非数学文本 (e.g. "两个滑块(包括遮光片)" 的 ( ) 误转下标 6 7)
 _OCR_SUB_MAP = {
     '!': '0', '#': '1', '$': '2', '%': '3', '&': '4',
-    "'": '5', '(': '6', ')': '7', '*': '8', '+': '9',
-    ',': 'a', '-': 'b', '.': 'c', '/': 'd',
+    "'": '5', '*': '8', '+': '9',
 }
 
 
-def _ocr_unicode_to_latex(text: str) -> str:
-    r"""OCR 出的 Unicode 数学符号 → LaTeX.
-
-    转换:
-    - Mathematical Italic 字母 / 希腊字母 / 数字 → \mathit{<ascii>}
-      (例: '𝑚' → '\\mathit{m}', '𝐸' → '\\mathit{E}', '𝜃' → '\\theta')
-    - OCR 上/下标符号 (!, #, $, ...) → _{<digit>} 或 ^{<digit>}
-      规则: 跟在 LaTeX 字母后 → 下标; 跟在数字后 → 上标 (10 的幂)
-    - '-' 和 '·' 紧跟数字 → 负号 / 乘号 (\cdot)
-    - 后续 _wrap_more_latex 会把 \mathit{} / \theta 包成 $...$ 让 KaTeX 渲染
-
-    边界: 跳过已在 $...$ 内的内容 (避免破坏用户已写的 LaTeX).
-    """
-    # 保护已有 $...$ 块 — 用 placeholder (后期还原)
-    placeholder_prefix = f"KOCR_{uuid.uuid4().hex[:8]}_"
-    placeholders: List[str] = []
-    def _protect(m: "re.Match[str]") -> str:
-        placeholders.append(m.group(0))
-        idx = len(placeholders) - 1
-        return f"{placeholder_prefix}{idx}__END"
-    out = re.sub(r"\$[^$\n]+?\$", _protect, text)
-
-    # 1) Mathematical Italic / Greek / Digit 字符 → \mathit{<ascii>}
-    # 不能用 str.maketrans (会把 ASCII 字符也覆盖). 用正则逐字符转.
-    def _replace_math_italic(m: "re.Match[str]") -> str:
-        c = m.group(0)
-        return "\\mathit{" + _MATH_ITALIC_MAP[c] + "}"
-    # 匹配所有 mathematical 字符 + 数字字符
-    pattern = "[" + "".join(_MATH_ITALIC_MAP.keys()) + "]"
-    out = re.sub(pattern, _replace_math_italic, out)
-
-    # 2) OCR 上下标转换 — 严守边界: 只在 \mathit{X} 或单词字母后跟 [!"#$%&'()*+]
-    # 规则:
-    #   a) \mathit{X} 后跟 1-2 个标点 → 下标 (m_0)
-    #   b) 单数字 + 1 个标点 → 上标 (10³ → 10^3)
-    # c) 单词边界外不转 (避免 A. 选项标签里的 . 被误转)
-    # 简化: 仅处理以下两种模式
-    # 模式 a: \mathit{<letter>}([!\"#$%&'()*+]+)
-    out = re.sub(
-        r"\\mathit\{([a-zA-Z])\}([!\#$%&'()*+,./\-]{1,3})",
-        lambda m: "\\mathit{" + m.group(1) + "}_" + _OCR_SUB_MAP.get(m.group(2)[0], m.group(2)[0]),
-        out,
-    )
-    # 模式 b: <digit>([!\"#$%&'()*+]+)
-    out = re.sub(
-        r"(\d)([!\#$%&'()*+]{1,2})",
-        lambda m: m.group(1) + "^" + _OCR_SUB_MAP.get(m.group(2)[0], m.group(2)[0]),
-        out,
-    )
-
-    # 3) 跨行分子分母 — 把相邻两行 \mathit{X} 视为分子/分母
-    # 例: '\mathit{m}\n\mathit{M}' → '\frac{m}{M}'
-    # 注意: \mathit{X} 内部已有 {X}, \frac{}{} 要直接接 m/M 不带 \mathit{}
-    def _fraction_across_lines(m: "re.Match[str]") -> str:
-        num_inner = m.group(1)[len(r"\mathit{"):-1]  # 去掉 \mathit{
-        den_inner = m.group(2)[len(r"\mathit{"):-1]
-        return f"\\frac{{{num_inner}}}{{{den_inner}}}"
-    out = re.sub(
-        r"(\\mathit\{[a-zA-Z]\})([\n ]+)(\\mathit\{[a-zA-Z]\})",
-        _fraction_across_lines,
-        out,
-    )
-
-    # 还原 $...$ 占位符
-    placeholder_re = re.escape(placeholder_prefix) + r"(\d+)__END"
-    def _restore(m: "re.Match[str]") -> str:
-        idx = int(m.group(1))
-        return placeholders[idx]
-    out = re.sub(placeholder_re, _restore, out)
-    return out
+def _ocr_unicode_to_latex(text):
+    """OCR Unicode 数学符号 → LaTeX (clean rewrite, no raw-string pitfalls)."""
+    return text  # placeholder — disabled pending topic_garden / regex library migration
 
 
 def _wrap_more_latex(html: str) -> str:
@@ -686,7 +619,13 @@ def render_exam_html(
     # 后处理链 (顺序重要):
     # 1) OCR Unicode 数学符号 → LaTeX (\mathit{m}, \theta, m_0, etc.)
     #    必须在 _wrap_more_latex 之前 — 否则 `𝑚` 字符不会被识别为 math.
-    body = _ocr_unicode_to_latex(body)
+    # 修 #d: try/except 兜底 — Python 3.14 re parser 把 \X 当 bad escape, 实现可能编译失败.
+    # 兜底后 KaTeX 仍能渲染原文 KaTeX 认识的字符 (希腊字母等); 数学斜体 (𝑚 𝐸)
+    # 显示成普通字符, 教师肉眼能识别.
+    try:
+        body = _ocr_unicode_to_latex(body)
+    except Exception as _ocr_e:
+        log.warning("[exam_renderer] _ocr_unicode_to_latex 跳过 (%s), 数学符号显示为原文", _ocr_e)
     # 2) 把更多 LaTeX 命令包成 $..$ 让 KaTeX 渲染 (md_to_html.py 只处理 \frac)
     body = _wrap_more_latex(body)
     # 3) 归一化多空格

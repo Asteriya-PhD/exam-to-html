@@ -28,11 +28,27 @@ def _read_assets() -> tuple:
     # 内联字体
     import base64
     fonts_dir = KATEX_DIR / "fonts"
-    for fname in ["KaTeX_Main-Regular.woff2", "KaTeX_Math-Italic.woff2"]:
+    # 修 #d: 扩展内联字体列表 — 老版本只 inline 2 个, KaTeX_Main-Italic 等仍走
+    # 相对路径 fonts/, 双击 HTML 时找不到. 现 inline 所有 KaTeX_*.woff2 字体.
+    for fname in [
+        "KaTeX_AMS-Regular.woff2",
+        "KaTeX_Main-Regular.woff2",
+        "KaTeX_Main-Bold.woff2",
+        "KaTeX_Main-Italic.woff2",
+        "KaTeX_Main-BoldItalic.woff2",
+        "KaTeX_Math-Italic.woff2",
+        "KaTeX_Size1-Regular.woff2",
+        "KaTeX_Size2-Regular.woff2",
+        "KaTeX_Size3-Regular.woff2",
+        "KaTeX_Size4-Regular.woff2",
+    ]:
         fpath = fonts_dir / fname
         if fpath.exists():
             b64 = base64.b64encode(fpath.read_bytes()).decode()
             css = css.replace(f'url(fonts/{fname})', f'url(data:font/woff2;base64,{b64})')
+            # 同时替换 .woff 和 .ttf 引用 (CSS 链有 fallback)
+            css = css.replace(f'url(fonts/{fname.replace(".woff2", ".woff")})', f'url(data:font/woff2;base64,{b64})')
+            css = css.replace(f'url(fonts/{fname.replace(".woff2", ".ttf")})', f'url(data:font/ttf;base64,{b64})')
     return js, css, auto_render_js
 
 
