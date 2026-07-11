@@ -10,6 +10,13 @@ exam-to-html PyInstaller spec
 PDF2PPT v2 parser 子集已 vendored 到本仓 pdf2ppt/，不再需要 ../PDF2PPT。
 """
 import sys
+
+# 修 Windows cp1252 console: 强制 stdout utf-8, 避免 print 中文/特殊路径
+# 触发 UnicodeEncodeError, PyInstaller 直接挂掉
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 from pathlib import Path
 
 # 找到 topic_garden 包路径 (兄弟仓 editable 安装)
@@ -24,11 +31,13 @@ if not (TG_REPO / 'templates').exists():
 # 修 CI PyInstaller fail: courseware/images 是 topic_garden 运行时产物,
 # 被 gitignore, CI clone 后目录不存在 — 用 .exists() 过滤掉, 缺失仅 warn。
 def _opt_data(src_rel: str, dst: str):
-    """仅当 src 存在时返回 datas 元组, 否则返回 None (供 filter 排除)。"""
+    """仅当 src 存在时返回 datas 元组, 否则返回 None (供 filter 排除)."""
     src = TG_REPO / src_rel
     if src.exists():
         return (str(src), dst)
-    print(f"[spec] skip data: {src} 不存在 (CI clone 时常因 gitignore 缺失)")
+    # 修 Windows PyInstaller cp1252 console 不能输出中文:
+    # [spec] skip data: <path> 改 ASCII only
+    print(f"[spec] skip data: {src} not found (CI clone often missing due to gitignore)")
     return None
 
 _datas = [
