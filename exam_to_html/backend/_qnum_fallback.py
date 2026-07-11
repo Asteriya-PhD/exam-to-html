@@ -208,7 +208,7 @@ def extract_qnums_from_text(text: str) -> List[Tuple[int, int]]:
     顶级题号的唯一判定依据是 `_TOP_QNUM_RE` 匹配 + `1 <= num <= 50`,
     不再做单调性校验 — 同一卷里 `① / 第1题 / T1. / 1.` 都是题号 1 是合法的
     (题号格式重置但指向"题 1"); 而 `0.05 / 1.14` 这类假阳已被 `_TOP_QNUM_RE`
-    的 `(?!\d)` 负向先行 + `num >= 1` 守住。
+    的 `(?!\\d)` 负向先行 + `num >= 1` 守住。
 
     圈码 (M5-4) 注意: 本函数不区分圈码与数字顶级 — 调用方
     `_build_drafts_from_pages` 用状态机做圈码降级.

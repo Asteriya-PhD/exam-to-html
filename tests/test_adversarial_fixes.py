@@ -547,6 +547,37 @@ class TestConfigValidation:
         assert loaded["mineru_token"] == "abc"
 
 
+class TestPageSizesInPlaceReset:
+    """M-19 fix: page_count/page_sizes 重置必须 in-place (clear), 不创建新 list.
+
+    若用 `exam.page_sizes = []`, 外部持 `old_ref = exam.page_sizes; ... reset`
+    后再读 old_ref 仍见旧数据 (因为 dataclass 字段是普通赋值, 不影响
+    外部拿到的旧 list)。`.clear()` 改 in-place, 旧引用看到新数据。
+    """
+
+    def test_page_count_page_sizes_in_place_reset(self):
+        from pdf2ppt._v2_models import ParsedExam
+
+        exam = ParsedExam()
+        exam.page_count = 5
+        exam.page_sizes.append((100.0, 200.0))
+        # 模拟外部代码持有 page_sizes 引用
+        external_ref = exam.page_sizes
+
+        # 模拟 _extract_images_from_pdf 的 reset
+        exam.page_count = 0
+        exam.page_sizes.clear()
+        exam.page_count = 3
+        exam.page_sizes.append((300.0, 400.0))
+
+        # 外部 ref 看到新数据
+        assert external_ref == [(300.0, 400.0)], (
+            f"外部 ref 应看到新数据, 实际 {external_ref}"
+        )
+        assert exam.page_count == 3
+        assert exam.page_sizes is external_ref, "应同 list 对象"
+
+
 # ============================================================
 # L-8: _read_assets 用 utf-8-sig
 # ============================================================

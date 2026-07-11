@@ -1191,9 +1191,12 @@ class MinerUParser(BaseParser):
         在 precision 路径下会被覆盖 (前次调用已 set), GLM4V 路径下也会被设。
         """
         import fitz
-        # 修 M-19: 重置 page_count/page_sizes (避免重复调用累加)
+        # 修 M-19: 重置 page_count/page_sizes (避免重复调用累加)。
+        # 修 _v2_models reset bug: 用 `=` 创建新 list 会断开外部对原 list 的引用,
+        # 导致持有 exam.page_sizes 引用的代码 (rebuild / composer) 看不到新数据。
+        # 改用 .clear() in-place 清空再 append。
         exam.page_count = 0
-        exam.page_sizes = []
+        exam.page_sizes.clear()
         try:
             doc = fitz.open(pdf_path)
             try:

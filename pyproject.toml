@@ -34,28 +34,33 @@ classifiers = [
 # 然后再 `pip install -e .` 或 `pip install -e ".[dev]"`。
 # PyInstaller frozen 模式: 打包前确保 topic-garden 已装进同一 venv。
 dependencies = [
-    "topic-garden>=0.18,<0.19",
-    "pywebview>=4.4",
-    "fastapi>=0.110",
-    "uvicorn[standard]>=0.27",
-    "python-multipart>=0.0.9",        # FastAPI multipart/form-data 必需
-    "requests>=2.31",                 # 检查更新 / MinerU API 调用
+    # 用 ~= 锁大版本 (PEP 440): 允许最后一位 patch/minor 浮动, 但阻止
+    # 大版本变更 (e.g. fastapi 0.x → 1.x, pydantic 1.x → 2.x, peewee 3.x → 4.x)。
+    # 不锁会撞上 PyMuPDF 1.28 改 None 行为 (CI 文档记录 case)。
+    "topic-garden~=0.18",        # 兄弟仓, 0.19 schema 大改 (Tuple 缺失等) 未跟
+    "pywebview~=4.4",
+    "fastapi~=0.110",
+    "uvicorn[standard]~=0.27",
+    "python-multipart~=0.0.9",   # FastAPI multipart/form-data 必需
+    "requests~=2.31",            # 检查更新 / MinerU API 调用
 ]
 
 # precision 模式（带【单选】【多选】徽章）需要 MinerU SDK。
 # flash 模式（默认）不需要, 教师开箱即用。
 [project.optional-dependencies]
 precision = [
-    "mineru-open-sdk>=0.2.5",
+    "mineru-open-sdk~=0.2.5",   # flash_extract / precision 入口
 ]
 dev = [
-    "pytest>=7.0",
-    "httpx2>=0.0.1",   # starlette.testclient 0.48+ 强制要求 httpx2, 不再吃 httpx
-    # CI smoke E2E (test_convert_pdf_real_pdf) 走 vendored pdf2ppt.MinerUParser,
-    # 它的 _get_client() 调 `from mineru import MinerU` — flash 模式也走该路径。
-    # MinerU SDK 又依赖 PyMuPDF 抽页; 没这俩, 真实 PDF 必返 drafts=0。
-    "mineru-open-sdk>=0.2.5",   # MinerU.flash_extract / precision 入口
-    "pymupdf>=1.24",            # pdf2ppt / _qnum_fallback 抽 PDF 全文
+    "pytest~=7.0",
+    "pytest-xdist~=3.0",        # 并行加速 (conftest 已设 worker_id DB 隔离)
+    "httpx2~=2.0",              # starlette.testclient 0.48+ 强制要求 httpx2
+    # CI smoke E2E 走 vendored pdf2ppt.MinerUParser, _get_client() 调
+    # `from mineru import MinerU` — flash 模式也走。MinerU SDK 又依赖 PyMuPDF
+    # 抽页; 没这俩, 真实 PDF 必返 drafts=0。锁大版本避免 PyMuPDF 1.28+
+    # 改 None 行为 / MinerU 0.3 schema 大改。
+    "mineru-open-sdk~=0.2.5",
+    "pymupdf~=1.24",
 ]
 
 [project.scripts]

@@ -69,7 +69,9 @@ jobs:
 
       - name: Run smoke tests
         shell: bash
-        run: pytest tests/ -v
+        run: pytest tests/ -v -n auto
+        # pytest-xdist 并行 — conftest.py 已设 PYTEST_XDIST_WORKER 隔离 DB
+        # (per-worker: $tmpdir/exam_to_html_test_<worker_id>.db), 不会撞库
 
   # ============================================================
   # Build — PyInstaller 出 .exe / .app
