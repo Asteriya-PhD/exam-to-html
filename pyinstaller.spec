@@ -13,9 +13,15 @@ import sys
 from pathlib import Path
 
 # 找到 topic_garden 包路径 (兄弟仓 editable 安装)
+# topic_garden layout: <repo>/src/topic_garden/ — TG_PKG.parent = src, .parent.parent = repo root
 import topic_garden
 TG_PKG = Path(topic_garden.__path__[0])
 TG_REPO = TG_PKG.parent.parent  # src/topic_garden/ → src/ → repo root
+# 兜底: 兼容 flat layout (旧版本 topic_garden 把模板/图放在 repo 根)
+if not (TG_REPO / 'templates').exists():
+    TG_REPO = TG_PKG.parent  # flat layout: topic_garden/ → repo root
+TG_TEMPLATES = TG_REPO / 'templates'
+TG_IMAGES = TG_REPO / 'courseware' / 'images'
 
 block_cipher = None
 
@@ -29,11 +35,10 @@ a = Analysis(
     datas=[
         # exam-to-html 的 GUI 静态文件
         ('exam_to_html/gui/static', 'exam_to_html/gui/static'),
-        # topic_garden 的 Jinja 模板 (composer 渲染用)
-        (str(TG_REPO / 'templates'), 'topic_garden/templates'),
-        # topic_garden 的 courseware/images (figure_paths 引用此目录)
-        # 注: 此目录可能为空, 缺失时 PyInstaller 会 warn 但不报错
-        (str(TG_REPO / 'courseware' / 'images'), 'courseware/images'),
+        # topic_garden 的 Jinja 模板 (composer 渲染用) — 缺失时仅 warn
+        (str(TG_TEMPLATES), 'topic_garden/templates'),
+        # topic_garden 的 courseware/images (figure_paths 引用此目录) — 同上
+        (str(TG_IMAGES), 'courseware/images'),
         # inbox/archive 空目录占位 (避免 frozen 模式下空目录问题)
         # PyInstaller 不打包空目录, 但运行时 %APPDATA% 自动 mkdir
     ],
