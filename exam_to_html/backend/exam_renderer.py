@@ -529,12 +529,18 @@ def render_exam_html(
 
     katex_block = _load_katex_assets()
 
+    # 安全 (H-9): final_title = pdf_path.stem 直接 f-string 拼入 <title>。
+    # PDF 文件名含 `<script>` 等会被原样输出, 双击 HTML 触发 XSS。
+    # f-string 不走 Jinja2 autoescape, 必须显式 HTML 转义。
+    from html import escape as _html_escape
+    safe_title = _html_escape(final_title)
+
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
-  <title>{final_title} — 试卷讲评</title>
+  <title>{safe_title} — 试卷讲评</title>
   <style>
 {EXAM_CSS}
   </style>

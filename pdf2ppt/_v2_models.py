@@ -47,5 +47,26 @@ class ParsedExam:
     # 形如 {page_idx (0-based): {"single": [1,2,3,4,5,6,7], "multi": [8,9,10]}}
     # 一张卷子多个 page_idx 可同时有区间 (湖北卷头常 1 次性把多选题范围写在 page=1)。
     page_question_layout: Dict[int, Dict[str, List[int]]] = field(default_factory=dict)
+    # 修 M-9: 跟踪解析过程中生成的临时图片文件路径, 上层 pipeline 在 HTML
+    # 渲染完成后调 cleanup_temp_files() 删除孤儿。
+    _temp_files: List[str] = field(default_factory=list)
+
+    def cleanup_temp_files(self) -> int:
+        """删除解析过程中注册的临时文件, 返回成功删除数.
+
+        修 M-9: 上层 pipeline 在 HTML 渲染 + courseware/images 接管后调用, 避免
+        长期运行填满磁盘。被 topic_garden 复制的图(td_path 仍存在)正常 unlink。
+        """
+        import os
+        deleted = 0
+        for p in list(self._temp_files):
+            try:
+                if os.path.exists(p):
+                    os.unlink(p)
+                    deleted += 1
+            except OSError:
+                pass
+            self._temp_files.clear()
+        return deleted
 
 

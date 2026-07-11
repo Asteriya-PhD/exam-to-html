@@ -61,6 +61,8 @@ def _ensure_images_link(output_dir: Path) -> Path:
     优先用 symlink (避免复制 3000+ 张图), Windows 走 junction.
     若 symlink 不支持 (Windows 非管理员), 退化为 copy_tree.
 
+    修 M-15: 检测过期 symlink — 目标不存在时 unlink + 重建, 避免 <img src="..."> 404。
+
     Returns:
         output_dir/images 路径 (新创建或已存在)
     """
@@ -68,9 +70,15 @@ def _ensure_images_link(output_dir: Path) -> Path:
     if target.is_dir() and not target.is_symlink():
         return target
     if target.is_symlink():
+        # 修 M-15: 显式解析 — resolve(strict=True) 若 target 不存在会 OSError
         try:
-            target.resolve(strict=False)
-            return target
+            resolved = target.resolve(strict=True)
+            if not resolved.exists():
+                # symlink 存在但 target 不存在 (courseware/images 被删/移动)
+                log.warning("[pipeline] 过期 symlink → %s 已失效, 重建", resolved)
+                target.unlink()
+            else:
+                return target
         except (OSError, RuntimeError):
             target.unlink()
 
@@ -403,21 +411,54 @@ def convert_pdf(
     output_path = output_dir / f"{stem}.html"
     composer = TopicComposer()
     try:
-        compose_result = composer.compose(topic_id=topic.id)
-        from topic_garden.db import log_compose
-        full_html = render_exam_html(compose_result, title=stem)
-        output_path.write_text(full_html, encoding="utf-8")
-        _ensure_images_link(output_dir)
         try:
-            log_compose(
-                topic_id=topic.id, html=full_html,
-                class_label=None, source="api",
-            )
+            compose_result = composer.compose(topic_id=topic.id)
+            from topic_garden.db import log_compose
+            full_html = render_exam_html(compose_result, title=stem)
+            output_path.write_text(full_html, encoding="utf-8")
+            _ensure_images_link(output_dir)
+            try:
+                log_compose(
+                    topic_id=topic.id, html=full_html,
+                    class_label=None, source="api",
+                )
+            except Exception as e:
+                log.warning("[pipeline] log_compose 跳过: %s", e)
         except Exception as e:
-            log.warning("[pipeline] log_compose 跳过: %s", e)
-    except Exception as e:
-        log.exception("[pipeline] compose 失败")
-        raise PipelineError(f"HTML 生成失败: {e}", cause=e) from e
+            # 修 M-14: compose/write 失败时 Topic 变孤儿, 重试会创建新 Topic, 老 Topic 永留 DB。
+            # 修法: 失败时 delete topic (含关联的 add_topic_question 行) + 清空输出文件
+            log.exception("[pipeline] compose 失败, 回滚 Topic #%d", topic.id)
+            try:
+                from topic_garden.db import Topic, TopicQuestion
+                # 先删关联行 (FK constraint), 再删 Topic
+                TopicQuestion.delete().where(TopicQuestion.topic == topic.id).execute()
+                Topic.delete().where(Topic.id == topic.id).execute()
+            except Exception as cleanup_e:
+                log.warning("[pipeline] 回滚 Topic #%d 失败 (留孤儿): %s", topic.id, cleanup_e)
+            try:
+                if output_path.exists():
+                    output_path.unlink()
+            except OSError:
+                pass
+            raise PipelineError(f"HTML 生成失败: {e}", cause=e) from e
+    finally:
+        # 修 M-9: 清理解析过程产生的 tmp 图片 (HTML 已渲染完, 不再引用)
+        # topic_garden process_inbox 期间已把图复制到 courseware/images, 这里的
+        # tmp 文件已是无引用孤儿 — 安全删。
+        try:
+            import glob
+            import os as _os
+            import tempfile as _tf
+            tmpdir = _tf.gettempdir()
+            # 清理本次 PDF 上传时间戳之后的 mineru_* 图片 (避免误删别的进程)
+            for p in glob.glob(_os.path.join(tmpdir, "mineru_*")):
+                try:
+                    if _os.path.getmtime(p) >= started:
+                        _os.unlink(p)
+                except OSError:
+                    pass
+        except Exception as cleanup_e:
+            log.debug("[pipeline] tmp cleanup skipped: %s", cleanup_e)
 
     summary = result.get("summary", {})
     duration_ms = int((time.time() - started) * 1000)

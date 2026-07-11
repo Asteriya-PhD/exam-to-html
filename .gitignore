@@ -44,6 +44,7 @@ config.local.json
 
 # OMC + 临时
 .omc/
+.omo/
 .claude/
 config.json
 benchmark.html

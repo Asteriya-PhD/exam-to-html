@@ -95,9 +95,13 @@ def split_inline_options(content_md: str) -> str:
         if not _is_inline_options_line(line):
             out_lines.append(line)
             continue
-        # 用同一 regex 的 finditer 拿所有 A-D 标签的 (start, end)
-        cleaned = re.sub(r"\$[^$]*\$", "", line)
-        matches = list(_INLINE_OPT_SPLIT.finditer(cleaned))
+        # 用同一 regex 的 finditer 拿所有 A-D 标签在 **原 line** 中的 (start, end)。
+        # 关键:不能在 cleaned ($...$ 被剥) 上拿位置,再切原 line — 公式长度差异
+        # 会让索引错位,选项内容被切空 (e.g. "A. $\\frac{1}{2}$ B. $\\frac{1}{3}$ ..."
+        # 中 $\\frac{1}{2}$ 共 11 字符 → cleaned 短 11 字符,B 标签位置在 cleaned 里是
+        # 5,在原 line 里是 16,若用 cleaned 索引切原 line,seg_start=5 落到 "$" 上,
+        # body = "$\\frac{1}" 不是 "$\\frac{1}{2}$")。
+        matches = list(_INLINE_OPT_SPLIT.finditer(line))
         if len(matches) < 2:
             out_lines.append(line)
             continue
@@ -106,7 +110,7 @@ def split_inline_options(content_md: str) -> str:
         prefix = line[: first.start()].rstrip()
         opts: List[str] = []
         for i, m in enumerate(matches):
-            seg_start = m.end()  # 标签 `A. ` 之后
+            seg_start = m.end()  # 标签 `A. ` 之后 (原 line 中的位置)
             seg_end = matches[i + 1].start() if i + 1 < len(matches) else len(line)
             body = line[seg_start:seg_end].strip()
             if not body:
@@ -224,13 +228,12 @@ def reattach_option_prose(content_md: str) -> str:
                     # 取当前选项字母 (e.g. "B.") 决定起始 slot
                     cur_letter = _OPTION_HEAD_RE.match(line).group(0).strip()[0].upper()
                     start_idx = option_seq.index(cur_letter) if cur_letter in option_seq else 0
-                    # 把 pending_prose 顺序分配到 A→B→C→...
-                    # 但要确保分配不会超出当前选项的范围:
-                    # 当前是 cur_letter, prose 有 N 行 → 把 prose[0..N-1] 拼到 out[new_idx..new_idx+N-1]
-                    # 注意: out[new_idx..] 已经包含本选项头,我们只 append 后续 prose
-                    # 实际上,只分配 prose[0..N-1] 中从 start_idx 开始的 slot
-                    # 简化:把 prose[i] 拼到 out[new_idx + i] (i 从 0 开始,但第 0 个是当前选项)
-                    # 实际逻辑:prose[0] 拼到 out[new_idx] (A 尾),prose[1] 拼到 out[new_idx+1] (B 尾) ...
+                    # 修 M-1: 老代码直接 prose[i] 拼到 out[new_idx + i], 但 B/C/D 还没 append,
+                    # target_idx >= len(out) 走 else 分支,prose 全堆到 A 上 (新选项被覆盖)。
+                    # 修法: 不够的 slot 先 append 空选项头 "B. " / "C. " / "D. ", 然后再
+                    # 把 prose[i] 拼到对应 slot 尾部。选项字母按 start_idx + i 派生。
+                    # prose 数 N, 当前选项是 cur_letter;但更安全是按 prose 数展开 slot,
+                    # 头字母用 option_seq[start_idx + i]
                     for i, prose_line in enumerate(pending_prose):
                         target_idx = new_idx + i
                         if target_idx < len(out):
@@ -238,10 +241,15 @@ def reattach_option_prose(content_md: str) -> str:
                                 out[target_idx].rstrip() + prose_line
                             ).strip()
                         else:
-                            # prose 多于选项数 — 落到最后一个选项 (兜底)
-                            out[new_idx] = (
-                                out[new_idx].rstrip() + prose_line
-                            ).strip()
+                            # 修 M-1: 派生正确选项字母并 append 新 slot, 不再堆到 new_idx
+                            new_letter_idx = start_idx + (target_idx - new_idx)
+                            new_letter = (
+                                option_seq[new_letter_idx]
+                                if new_letter_idx < len(option_seq)
+                                else option_seq[-1]
+                            )
+                            new_slot = f"{new_letter}. {prose_line.strip()}"
+                            out.append(new_slot)
                 pending_prose = []
             last_option_idx = new_idx
         elif _looks_like_option_prose(line):
@@ -397,12 +405,17 @@ def _clean_ocr_noise(text: str) -> str:
     典型: "小球的速度 00000000000 O0" → "小球的速度"
     策略: 匹配行内独立的纯数字 (≥4位) + 可选单字母后缀,替换为空。
     不影响正常物理量如 "97.43cm" (有单位) 或 "1.5m" (有小数点+单位)。
+
+    修 L-3: 老正则 `\\s+\\d{4,}\\s*[A-Z]?\\d*\\s*` 会误删合法 4 位物理量
+    (如 ` 1024 Pa`, ` 7600 V`),因为它们前后也有空白。改为:
+    - 必须紧贴字母 `O` / `Q` 等 OCR 噪声字符
+    - 数字尾部不跟大写单位 (Pa/V/N/W/J 等)
+    - 只清理 8 位以上连续 0 的明显噪声 (如 `00000000`)
     """
     if not text:
         return text
-    # 清理纯数字垃圾 (≥4位连续数字, 或连续0, 不跟单位)
-    # 例: "00000000000 O0", "0000", "12345"
-    text = re.sub(r'\s+\d{4,}\s*[A-Z]?\d*\s*', ' ', text)
+    # 清理明显噪声: 8+ 个连续 0 (跟单位混淆概率极低)
+    text = re.sub(r'\s0{8,}\s*[A-Z]?\d*\s*', ' ', text)
     # 合并多余空格
     text = re.sub(r' {2,}', ' ', text)
     return text.strip()

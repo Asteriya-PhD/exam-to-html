@@ -480,7 +480,18 @@ class MinerUParser(BaseParser):
 
         # 方案1：裁切成长 PDF（左栏在上，右栏在下）- 避免 y 值冲突
         long_pdf = splitter.merge_to_long_pdf(pdf_path)
-        print(f"  📄 生成 A3 长PDF，共 {len(fitz.open(long_pdf))} 页")
+        # 修 H-7 (M-18): merge_to_long_pdf 在 0 页输入下返回 None; 老代码直接传 None 给
+        # fitz.open() 抛 "document is empty" / "cannot open broken document"。
+        # 现在显式空页检查 + 用上下文管理器确保 doc 关闭。
+        if not long_pdf or not os.path.exists(long_pdf):
+            print("  ⚠️ A3 长PDF 生成失败 (0 页或合并失败), 返回空 ParsedExam")
+            return ParsedExam(parser_used="mineru-a3-empty")
+        long_doc = fitz.open(long_pdf)
+        try:
+            long_page_count = len(long_doc)
+        finally:
+            long_doc.close()
+        print(f"  📄 生成 A3 长PDF，共 {long_page_count} 页")
 
         client = self._get_client()
         use_flash = kwargs.get("flash", not bool(self.token))
@@ -558,43 +569,66 @@ class MinerUParser(BaseParser):
 
             # 如果题号范围较小，使用题号作为阈值
             q_nums = [q.index for q in sorted_qs if q.index]
+            max_q = max(q_nums) if q_nums else 0
             if q_nums:
-                max_q = max(q_nums)
                 if max_q <= 10:
                     mid_idx = max_q  # 所有题都在左栏
                 elif max_q <= 20:
                     # 假设 1-10 选择题在左栏，11+ 非选择题在右栏
                     mid_idx = 10
 
+            # 修 M-5: 老代码无条件覆盖 q.column, 但 precision 路径下 _split_into_questions
+            # 已基于 page_idx % 2 正确赋 column (0/1)。覆盖会把双栏 PDF 的右栏题全部
+            # 打回左栏。修法: 仅当所有题 source_page=0 (flash 模式 page_idx 全部折叠成 0)
+            # 时用启发式, precision 模式保留真实赋值。
+            flash_mode = all(q.source_page == 0 for q in exam.questions)
             updated = 0
-            for q in exam.questions:
-                if q.index and q.index <= mid_idx:
-                    q.column = 0  # 左栏
-                else:
-                    q.column = 1  # 右栏
-                    updated += 1
+            # 修 M-2: column_map 真用于栏位推断 — 修法是按 source_page // 2 映射回
+            # long_pdf 页码 (long_pdf 页 0,1 对应原 PDF 1 的左/右),用 column_map[原 page]
+            # 覆盖。若 column_map 是空的 (flash 模式无 P0L/P0R 标记), 退回题号启发。
+            have_marker = bool(column_map)
+            if have_marker and not flash_mode:
+                for q in exam.questions:
+                    long_page = q.source_page * 2  # 原 page → long PDF 左栏页
+                    if long_page in column_map:
+                        q.column = column_map[long_page]
+                        if q.column == 1:
+                            updated += 1
+                    # column_map 未覆盖的题 (边缘情况) 保留 page_idx % 2 推断
+            elif flash_mode:
+                # Flash 模式启发式: 题号 ≤ mid_idx 在左栏, > mid_idx 在右栏
+                for q in exam.questions:
+                    if q.index and q.index <= mid_idx:
+                        q.column = 0
+                    else:
+                        q.column = 1
+                        updated += 1
 
-            print(f"  📌 题目题号范围: {min(q_nums)}-{max_q}，前 {mid_idx} 道在左栏")
-            if updated > 0:
-                print(f"  📌 发现 {updated} 道题在右栏")
+            if q_nums:
+                print(f"  📌 题目题号范围: {min(q_nums)}-{max_q}，前 {mid_idx} 道在左栏")
+                if updated > 0:
+                    print(f"  📌 发现 {updated} 道题在右栏")
 
-        # 清理临时文件
+        # 修 M-8: 临时 long_pdf 必须 finally 清理, 老代码 try/except 中任意
+        # 异常向上抛就泄漏文件到 temp 目录。
         try:
-            os.unlink(long_pdf)
-        except Exception:
-            pass
-
-        print(f"  ✅ A3 裁切解析完成：共 {len(exam.questions)} 道题")
-        exam.parser_used = "mineru-a3-long"
-        # v0.12.2 — 卷头识别 (A3 路径也走 markdown 分支,所以可以共用 layout)
-        try:
-            exam.page_question_layout = _scan_page_layout_for_first_pages(
-                result.markdown if 'result' in locals() else "", max_pages=5
-            )
-        except Exception:
-            pass
-        _apply_layout_to_questions(exam, exam.page_question_layout)
-        return exam
+            print(f"  ✅ A3 裁切解析完成：共 {len(exam.questions)} 道题")
+            exam.parser_used = "mineru-a3-long"
+            # v0.12.2 — 卷头识别 (A3 路径也走 markdown 分支,所以可以共用 layout)
+            try:
+                exam.page_question_layout = _scan_page_layout_for_first_pages(
+                    result.markdown if 'result' in locals() else "", max_pages=5
+                )
+            except Exception:
+                pass
+            _apply_layout_to_questions(exam, exam.page_question_layout)
+            return exam
+        finally:
+            try:
+                if long_pdf and os.path.exists(long_pdf):
+                    os.unlink(long_pdf)
+            except Exception:
+                pass
 
     def _parse_flash(self, client, pdf_path: str, **kwargs) -> ParsedExam:
         """Flash Extract：免费快速，输出 Markdown"""
@@ -619,26 +653,29 @@ class MinerUParser(BaseParser):
         column_map = {}
         try:
             import fitz
+            # 修 M-12: fitz doc 用 try/finally 确保异常路径也关闭
             doc = fitz.open(pdf_path)
-            for pn in range(len(doc)):
-                page = doc[pn]
-                page_width = page.rect.width
-                dict_text = page.get_text('dict')
-                for block in dict_text.get('blocks', []):
-                    if block.get('type') != 0:
-                        continue
-                    for line in block.get('lines', []):
-                        for span in line.get('spans', []):
-                            txt = span.get('text', '')
-                            bbox = span.get('bbox', [])
-                            if not bbox:
-                                continue
-                            if txt.startswith('P') and len(txt) >= 3:
-                                x = bbox[0]
-                                if x > page_width * 0.8:
-                                    col = 0 if txt[-1] == 'L' else 1
-                                    column_map[pn] = col
-            doc.close()
+            try:
+                for pn in range(len(doc)):
+                    page = doc[pn]
+                    page_width = page.rect.width
+                    dict_text = page.get_text('dict')
+                    for block in dict_text.get('blocks', []):
+                        if block.get('type') != 0:
+                            continue
+                        for line in block.get('lines', []):
+                            for span in line.get('spans', []):
+                                txt = span.get('text', '')
+                                bbox = span.get('bbox', [])
+                                if not bbox:
+                                    continue
+                                if txt.startswith('P') and len(txt) >= 3:
+                                    x = bbox[0]
+                                    if x > page_width * 0.8:
+                                        col = 0 if txt[-1] == 'L' else 1
+                                        column_map[pn] = col
+            finally:
+                doc.close()
         except Exception:
             pass
 
@@ -715,6 +752,9 @@ class MinerUParser(BaseParser):
                 )
                 tmp.write(img.data)
                 tmp.close()
+                # 修 M-9: 注册到 exam._temp_files, 上层 cleanup 删
+                if hasattr(exam, "_temp_files"):
+                    exam._temp_files.append(tmp.name)
                 # content_list 中的 img_path 是相对路径如 "images/xxx.jpg"
                 img_path_map[img.path] = tmp.name
 
@@ -772,7 +812,12 @@ class MinerUParser(BaseParser):
 
     @staticmethod
     def _associate_images(exam: ParsedExam, images: list) -> ParsedExam:
-        """将 MinerU 返回的图片数据保存到本地并关联到题目"""
+        """将 MinerU 返回的图片数据保存到本地并关联到题目.
+
+        修 M-9: 把临时图片路径注册到 exam._temp_files, 上层 pipeline 在 HTML 渲染
+        (或 topic_garden 复制图到 courseware/images) 完成后调用 exam.cleanup_temp_files()
+        删除孤儿 — 避免简单 unlink 破坏后续 <img src="..."> 引用。
+        """
         if not images:
             return exam
 
@@ -784,6 +829,7 @@ class MinerUParser(BaseParser):
             tmp.write(img.data)
             tmp.close()
             img_path_map[img.path] = tmp.name
+            exam._temp_files.append(tmp.name)
 
         # 更新 raw_blocks 中的图片路径
         for block in exam.raw_blocks:
@@ -854,10 +900,15 @@ class MinerUParser(BaseParser):
                     page_img_count = len([b for b in exam.raw_blocks
                                            if b.block_type == "image"
                                            and b.page_idx == page_idx])
-                    img_idx = sum(1 for b in exam.raw_blocks
-                                  if b.block_type == "image"
-                                  and b.page_idx == page_idx
-                                  and id(b) < id(block))
+                    # 修 M-4: 老代码用 `id(b) < id(block)` 排序, CPython 内存地址
+                    # 不可靠 (GC 后复用、PyMuPDF 块分配非连续)。改为按 enumerate 索引
+                    # (raw_blocks 是有序列表, 索引=文档顺序 = 视觉顺序)。
+                    img_idx = 0
+                    for _b in exam.raw_blocks:
+                        if _b.block_type == "image" and _b.page_idx == page_idx:
+                            if _b is block:
+                                break
+                            img_idx += 1
                     y_center = (img_idx / max(page_img_count, 1)) * 842
 
                 images_by_page[orig_page].append((block, y_center, col_idx))
@@ -896,45 +947,49 @@ class MinerUParser(BaseParser):
 
     @staticmethod
     def _assign_images_to_questions(img_list: list, questions: list):
-        """将图片列表分配到题目列表，使用 y_center 匹配"""
+        """将图片列表分配到题目列表，使用 y_center 匹配.
+
+        修 M-6: 老代码把 _q_y / _y_range 写到 Question 实例属性 (q._q_y),
+        多次调用 (左栏 → 右栏 → 孤儿) 时会相互覆盖 — 第二次调用基于第一次
+        残留的 _q_y 排序, 分配错位。改为局部变量, 函数返回即释放。
+        """
         if not questions or not img_list:
             return
 
-        # 计算每道题的 y 位置
-        # 优先使用 bbox，否则使用题号顺序估算位置
+        # 局部变量, 不再写 q._q_y
+        q_positions: list = []  # [(q, q_y)]
         for i, q in enumerate(questions):
-            q._q_y = float('inf')
+            q_y = float('inf')
             for b in q.blocks:
                 if b.block_type == "text" and b.bbox and len(b.bbox) >= 4:
-                    q._q_y = b.bbox[1]
+                    q_y = b.bbox[1]
                     break
-            if q._q_y == float('inf'):
-                # 没有 bbox 时，按题号顺序分配位置
-                # 每个题占 842/len(questions) 的高度
-                q._q_y = i * (842 / max(len(questions), 1))
+            if q_y == float('inf'):
+                # 没有 bbox 时, 按题号顺序分配位置
+                q_y = i * (842 / max(len(questions), 1))
+            q_positions.append((q, q_y))
 
-        questions_sorted = sorted(questions, key=lambda q: q._q_y)
+        questions_sorted = sorted(q_positions, key=lambda x: x[1])
 
-        # 为每道题计算 y 范围
-        for i, q in enumerate(questions_sorted):
+        # 为每道题计算 y 范围 (局部变量, 不污染 q 实例)
+        q_ranges: list = []  # [(q, y0, y1)]
+        for i, (q, q_y) in enumerate(questions_sorted):
             if i + 1 < len(questions_sorted):
-                q._y_range = (q._q_y, questions_sorted[i + 1]._q_y)
+                q_ranges.append((q, q_y, questions_sorted[i + 1][1]))
             else:
-                q._y_range = (q._q_y, float('inf'))
+                q_ranges.append((q, q_y, float('inf')))
 
         # 分配图片：图片的 y_center 落在哪个题目的 y 范围内
         for img_block, img_y in img_list:
             assigned = False
-            for q in questions_sorted:
-                if q._y_range[0] <= img_y < q._y_range[1]:
+            for q, y0, y1 in q_ranges:
+                if y0 <= img_y < y1:
                     q.blocks.append(img_block)
                     assigned = True
                     break
             if not assigned:
-                # 如果没找到，分配给最近的题目
-                if questions_sorted:
-                    nearest = min(questions_sorted, key=lambda q: abs(q._q_y - img_y))
-                    nearest.blocks.append(img_block)
+                # 超出最后题 → 挂到最后题
+                questions_sorted[-1][0].blocks.append(img_block)
 
     def _parse_markdown(self, markdown: str) -> ParsedExam:
         """将 Markdown 文本解析为 ParsedExam"""
@@ -1122,14 +1177,22 @@ class MinerUParser(BaseParser):
         return exam
 
     def _extract_images_from_pdf(self, exam: ParsedExam, pdf_path: str):
-        """从原始 PDF 提取图片，关联到题目中"""
+        """从原始 PDF 提取图片，关联到题目中.
+
+        修 M-12 + M-19: fitz doc 用 try/finally 关闭; 同时 page_count/page_sizes
+        在 precision 路径下会被覆盖 (前次调用已 set), GLM4V 路径下也会被设。
+        """
         import fitz
+        # 修 M-19: 重置 page_count/page_sizes (避免重复调用累加)
+        exam.page_count = 0
+        exam.page_sizes = []
         try:
             doc = fitz.open(pdf_path)
-            exam.page_count = len(doc)
-            for pn in range(len(doc)):
-                page = doc[pn]
-                exam.page_sizes.append((page.rect.width, page.rect.height))
+            try:
+                exam.page_count = len(doc)
+                for pn in range(len(doc)):
+                    page = doc[pn]
+                    exam.page_sizes.append((page.rect.width, page.rect.height))
 
                 # 检测栏位标记（L=左栏, R=右栏）
                 # 左栏偶数页(0,2,4...)的x坐标在左半部分
@@ -1152,6 +1215,9 @@ class MinerUParser(BaseParser):
                             )
                             tmp.write(img_data)
                             tmp.close()
+                            # 修 M-9: 注册到 exam._temp_files, 上层 cleanup 删
+                            if hasattr(exam, "_temp_files"):
+                                exam._temp_files.append(tmp.name)
                             # 添加为全局图片块，标记栏位
                             exam.raw_blocks.append(ContentBlock(
                                 block_type="image",
@@ -1162,7 +1228,8 @@ class MinerUParser(BaseParser):
                             ))
                     except Exception as ex:
                         print(f"  ⚠ 图片提取失败: {ex}")
-            doc.close()
+            finally:
+                doc.close()
         except Exception as e:
             print(f"  ⚠ PDF 图片提取失败: {e}")
 
@@ -1463,7 +1530,15 @@ class MinerUParser(BaseParser):
             if len(img_blocks) > max_figs:
                 # 移除多余的图片（保留前 max_figs 张）
                 removed = img_blocks[max_figs:]
-                q.blocks = [b for b in q.blocks if b not in removed or b.block_type != "image"]
+                # 修 M-7: 老代码 `b not in removed` 走 dataclass __eq__ (按字段比较),
+                # 一题含 2 个完全相同的 image block (同 img_path/bbox/page_idx) 时
+                # `not in` 会把两个都删。改为按 id 集合判断 — line 1778 用 `is not`
+                # 走 identity 才是正确的。
+                removed_ids = {id(b) for b in removed}
+                q.blocks = [
+                    b for b in q.blocks
+                    if not (id(b) in removed_ids and b.block_type == "image")
+                ]
                 # 将多余的图片移到下一题（如果有的话）
                 q_idx = questions.index(q)
                 if q_idx + 1 < len(questions):
@@ -1695,9 +1770,12 @@ class MinerUParser(BaseParser):
         reassign_count = 0
 
         # 处理有 bbox 的图片（原有逻辑）
-        if all_images:
-            # 按页处理
-            pages = set(img['page_idx'] for img in all_images)
+        # 修 H-2: 即便 all_images 为空,也要让 orphan 路径能迭代 page
+        # (以前 `if all_images: pages = ...` 后裸用 sorted(pages) 在 all_images 空时
+        # 会 NameError, A3 flash 路径下任何"所有图都无 bbox"的 PDF 直接崩溃)
+        pages = set(img['page_idx'] for img in all_images)
+        if orphan_images:
+            pages |= set(img['page_idx'] for img in orphan_images)
 
         for page in sorted(pages):
             page_images = [img for img in all_images if img['page_idx'] == page]
@@ -1871,26 +1949,30 @@ class GLM4VParser(BaseParser):
             raise RuntimeError("GLM-4V API key 未设置。请设置环境变量 GLM_API_KEY 或传入 --glm-key")
 
         doc = fitz.open(pdf_path)
-        exam = ParsedExam(page_count=len(doc))
+        try:
+            exam = ParsedExam(page_count=len(doc))
 
-        for pn in range(len(doc)):
-            page = doc[pn]
-            exam.page_sizes.append((page.rect.width, page.rect.height))
+            for pn in range(len(doc)):
+                page = doc[pn]
+                exam.page_sizes.append((page.rect.width, page.rect.height))
 
-            # 渲染为图片
-            mat = fitz.Matrix(2.0, 2.0)
-            pix = page.get_pixmap(matrix=mat)
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                # 渲染为图片
+                mat = fitz.Matrix(2.0, 2.0)
+                pix = page.get_pixmap(matrix=mat)
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
-            # 转为 base64
-            buf = io.BytesIO()
-            img.save(buf, format="PNG", quality=85)
-            img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+                # 转为 base64
+                buf = io.BytesIO()
+                img.save(buf, format="PNG", quality=85)
+                img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+                # 修 M-10: 显式释放 PIL Image / BytesIO, 不等 GC
+                img.close()
+                buf.close()
 
-            print(f"  📖 GLM-4V 解析第 {pn+1}/{len(doc)} 页...", end=" ", flush=True)
+                print(f"  📖 GLM-4V 解析第 {pn+1}/{len(doc)} 页...", end=" ", flush=True)
 
-            # 调用 API
-            prompt = """请解析这张试卷页面，返回 JSON 格式的结构化内容。
+                # 调用 API
+                prompt = """请解析这张试卷页面，返回 JSON 格式的结构化内容。
 要求：
 1. 识别所有题目，包括题号、题干、选项（如有）
 2. 数学公式用 LaTeX 格式表示
@@ -1909,88 +1991,108 @@ class GLM4VParser(BaseParser):
 
 只返回 JSON，不要其他内容。"""
 
-            resp = requests.post(
-                self.API_BASE,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}},
-                                {"type": "text", "text": prompt},
+                resp = None
+                try:
+                    resp = requests.post(
+                        self.API_BASE,
+                        headers={
+                            "Authorization": f"Bearer {self.api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": self.model,
+                            "messages": [
+                                {
+                                    "role": "user",
+                                    "content": [
+                                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}},
+                                        {"type": "text", "text": prompt},
+                                    ],
+                                }
                             ],
-                        }
-                    ],
-                    "temperature": 0.1,
-                    "max_tokens": 4096,
-                },
-                timeout=60,
-            )
-
-            if resp.status_code != 200:
-                print(f"失败 (HTTP {resp.status_code})")
-                continue
-
-            result = resp.json()
-            content = result["choices"][0]["message"]["content"]
-
-            # 提取 JSON
-            try:
-                # 尝试直接解析
-                parsed = json.loads(content)
-            except json.JSONDecodeError:
-                # 尝试提取 JSON 块
-                import re
-                json_match = re.search(r'\{[\s\S]*\}', content)
-                if json_match:
-                    parsed = json.loads(json_match.group())
-                else:
-                    print(f"JSON 解析失败")
-                    continue
-
-            # 转换为 ContentBlock
-            for block_data in parsed.get("blocks", []):
-                block_type = block_data.get("type", "text")
-                if block_type == "question":
-                    q = Question(
-                        index=block_data.get("number", 0),
-                        label=f"{block_data.get('number', '')}．",
-                        options=block_data.get("options", []),
-                        question_type="choice" if block_data.get("options") else "unknown",
+                            "temperature": 0.1,
+                            "max_tokens": 4096,
+                        },
+                        timeout=60,
                     )
-                    q.blocks.append(ContentBlock(
-                        block_type="text",
-                        content=block_data.get("text", ""),
-                        page_idx=pn,
-                    ))
-                    exam.questions.append(q)
-                elif block_type == "text":
-                    exam.raw_blocks.append(ContentBlock(
-                        block_type="text",
-                        content=block_data.get("text", ""),
-                        page_idx=pn,
-                    ))
-                elif block_type == "equation":
-                    exam.raw_blocks.append(ContentBlock(
-                        block_type="equation",
-                        content=block_data.get("latex", ""),
-                        page_idx=pn,
-                    ))
-                elif block_type == "image":
-                    exam.raw_blocks.append(ContentBlock(
-                        block_type="image",
-                        content=block_data.get("description", ""),
-                        page_idx=pn,
-                    ))
 
-            print("完成")
+                    # 修 M-11: API 错误结构不能直接 result["choices"], 显式判状态码 + try/except
+                    if resp.status_code != 200:
+                        print(f"失败 (HTTP {resp.status_code})")
+                        continue
+                    try:
+                        result_json = resp.json()
+                    except ValueError as je:
+                        print(f"JSON 解析失败: {je}")
+                        continue
+                    choices = result_json.get("choices") or []
+                    if not choices:
+                        print(f"API 返回无 choices: {result_json}")
+                        continue
+                    content = choices[0].get("message", {}).get("content", "")
+                    if not content:
+                        print(f"API 返回 content 为空")
+                        continue
 
-        doc.close()
+                    # 提取 JSON
+                    try:
+                        # 尝试直接解析
+                        parsed = json.loads(content)
+                    except json.JSONDecodeError:
+                        # 尝试提取 JSON 块
+                        import re
+                        json_match = re.search(r'\{[\s\S]*\}', content)
+                        if json_match:
+                            parsed = json.loads(json_match.group())
+                        else:
+                            print(f"JSON 解析失败")
+                            continue
+
+                    # 转换为 ContentBlock
+                    for block_data in parsed.get("blocks", []):
+                        block_type = block_data.get("type", "text")
+                        if block_type == "question":
+                            q = Question(
+                                index=block_data.get("number", 0),
+                                label=f"{block_data.get('number', '')}．",
+                                options=block_data.get("options", []),
+                                question_type="choice" if block_data.get("options") else "unknown",
+                            )
+                            q.blocks.append(ContentBlock(
+                                block_type="text",
+                                content=block_data.get("text", ""),
+                                page_idx=pn,
+                            ))
+                            exam.questions.append(q)
+                        elif block_type == "text":
+                            exam.raw_blocks.append(ContentBlock(
+                                block_type="text",
+                                content=block_data.get("text", ""),
+                                page_idx=pn,
+                            ))
+                        elif block_type == "equation":
+                            exam.raw_blocks.append(ContentBlock(
+                                block_type="equation",
+                                content=block_data.get("latex", ""),
+                                page_idx=pn,
+                            ))
+                        elif block_type == "image":
+                            exam.raw_blocks.append(ContentBlock(
+                                block_type="image",
+                                content=block_data.get("description", ""),
+                                page_idx=pn,
+                            ))
+
+                    print("完成")
+                finally:
+                    # 修 M-10: Response 连接释放, 避免 keep-alive 连接堆积
+                    if resp is not None:
+                        try:
+                            resp.close()
+                        except Exception:
+                            pass
+        finally:
+            doc.close()
         exam.parser_used = f"glm-4v-{self.model}"
         return exam
 

@@ -13,10 +13,14 @@ Endpoints:
 - 任务状态存内存 dict (app 单实例, 多窗口场景留 v1.1)
 - BackgroundTasks 异步跑 convert_pdf; 不做细进度, 二态 (processing/done/failed)
 - 不做鉴权 (本地 localhost only, 不暴露公网)
+- 路径白名单 (M7 安全加固): open-html / clear-incomplete / convert 输出目录都
+  必须落进允许的根目录 (courseware/, project_root/), 避免 localhost 上的
+  其他进程读 /Users/<...>/.ssh/id_rsa 等敏感路径触发任意文件删除/打开
 """
 from __future__ import annotations
 
 import logging
+import os
 import platform
 import subprocess
 import tempfile
@@ -24,7 +28,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
@@ -32,11 +36,54 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import __version__
 from .. import config as app_config
-from ..paths import gui_static_dir
+from ..paths import gui_static_dir, default_output_dir
 from ..updater import THROTTLE_HOURS, check_update
 from .pipeline import PipelineError, convert_pdf, scan_incomplete_uploads, clear_incomplete_uploads
 
 log = logging.getLogger(__name__)
+
+# ============================================================
+# 安全: 路径白名单根 (H-3, H-5, H-6)
+# ============================================================
+# 仅允许服务操作以下白名单目录之下的文件:
+#   - inbox/    (上传暂存, 仅 clear 残留时用)
+#   - archive/  (解析后归档)
+#   - courseware/images  (topic_garden 写图目录, 走 paths.courseware_images_dir)
+#   - default_output_dir (默认输出目录 = 桌面)
+#   - 系统临时目录 (上传临时落点)
+# 其他路径 (e.g. /Users/z/.ssh/id_rsa) 一律拒绝。
+def _resolve_allowed_roots() -> List[Path]:
+    """返回允许操作的根目录列表 (绝对路径)。"""
+    roots: List[Path] = []
+    try:
+        from ..paths import archive_dir, inbox_dir, courseware_images_dir
+        roots.append(archive_dir().resolve())
+        roots.append(inbox_dir().resolve())
+        roots.append(default_output_dir().resolve())
+        ci = courseware_images_dir()
+        # parent.parent 因为 images/ 之下是图, 实际我们要允许 courseware/
+        roots.append(ci.resolve().parent)
+    except Exception as e:
+        log.warning("[server] paths 解析失败, 白名单退化: %s", e)
+    # 系统临时目录 — 上传文件临时落点
+    import tempfile as _tf
+    roots.append(Path(_tf.gettempdir()).resolve())
+    return roots
+
+
+def _is_path_within_allowed(path: Path) -> bool:
+    """检查 path 是否在任一白名单根之下 (resolve 后比较)。"""
+    try:
+        abs_p = path.resolve()
+    except (OSError, RuntimeError):
+        return False
+    for root in _resolve_allowed_roots():
+        try:
+            abs_p.relative_to(root)
+            return True
+        except ValueError:
+            continue
+    return False
 
 app = FastAPI(
     title="exam-to-html",
@@ -46,7 +93,10 @@ app = FastAPI(
 
 # ============================================================
 # 任务状态 (内存 dict, 单实例 OK)
+# 修 M-16: 加 TTL + max size, 避免长跑后 _jobs 无限增长
 # ============================================================
+_JOBS_MAX_SIZE = 1000          # 上限 — 超出时清理最老的
+_JOBS_TTL_SECONDS = 3600       # 1h 后访问时清理
 _jobs_lock = threading.Lock()
 _jobs: Dict[str, Dict[str, Any]] = {}
 
@@ -54,6 +104,14 @@ _jobs: Dict[str, Dict[str, Any]] = {}
 def _new_job() -> str:
     job_id = uuid.uuid4().hex[:12]
     with _jobs_lock:
+        # 限长: 超过上限删最老的 (按 created_at)
+        if len(_jobs) >= _JOBS_MAX_SIZE:
+            sorted_jobs = sorted(
+                _jobs.items(),
+                key=lambda kv: kv[1].get("created_at", 0),
+            )
+            for old_id, _ in sorted_jobs[: len(_jobs) - _JOBS_MAX_SIZE + 1]:
+                _jobs.pop(old_id, None)
         _jobs[job_id] = {
             "status": "queued",
             "created_at": time.time(),
@@ -74,7 +132,16 @@ def _update_job(job_id: str, **kwargs: Any) -> None:
 
 
 def _get_job(job_id: str) -> Optional[Dict[str, Any]]:
+    """获取 job, 顺便清理过期 (created_at 超 1h)."""
     with _jobs_lock:
+        now = time.time()
+        # 惰性 TTL 清理
+        expired = [
+            jid for jid, j in _jobs.items()
+            if now - j.get("created_at", now) > _JOBS_TTL_SECONDS
+        ]
+        for jid in expired:
+            _jobs.pop(jid, None)
         return _jobs.get(job_id)
 
 
@@ -97,22 +164,57 @@ async def api_convert(
 
     立即返回 (job_id + status='queued')。
     前端轮询 GET /api/jobs/{job_id} 直到 status='done' 或 'failed'。
+
+    安全 (H-4, H-6):
+    - 边读边累计字节数, 超过 MAX_UPLOAD_BYTES 立刻拒绝 (避免 OOM)
+    - output_dir 必须落在白名单根之下 (避免任意目录写入)
     """
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="请上传 .pdf 文件")
+
+    # H-4: 上传大小限制 — 边读边计, 早退 (避免 2GB 文件全量驻内存)
+    from .pipeline import MAX_PDF_SIZE_BYTES
+    MAX_UPLOAD_BYTES = MAX_PDF_SIZE_BYTES  # 复用 pipeline 阈值 = 100MB
 
     # 读 config: 若调用方没传 mineru_token, 用 config 里的
     cfg = app_config.load()
     token = mineru_token if mineru_token else cfg.get("mineru_token")
     effective_mode = mode if mode else app_config.resolve_mode(cfg)
-    out_dir = Path(output_dir) if output_dir else app_config.resolve_output_dir(cfg)
+
+    # H-6: output_dir 路径白名单 — 解析后必须落进允许的根目录
+    if output_dir:
+        out_dir = Path(output_dir)
+        if not _is_path_within_allowed(out_dir):
+            raise HTTPException(
+                status_code=400,
+                detail=f"output_dir 不在白名单范围内: {out_dir}",
+            )
+    else:
+        out_dir = default_output_dir()
 
     # 先把上传流写到临时文件 (避免 UploadFile.read() 阻塞 + 保留 PDF 原始字节)
     suffix = Path(file.filename).suffix or ".pdf"
     tmp_pdf = Path(tempfile.mkstemp(prefix="exam_upload_", suffix=suffix)[1])
     try:
-        content = await file.read()
-        tmp_pdf.write_bytes(content)
+        # H-4: chunked read + 累加字节数, 超过阈值立刻 unlink + 拒
+        chunk_size = 1024 * 1024  # 1MB chunks
+        total = 0
+        with open(tmp_pdf, "wb") as f:
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_UPLOAD_BYTES:
+                    f.close()
+                    tmp_pdf.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"文件超过 {MAX_UPLOAD_BYTES // 1024 // 1024}MB 限制",
+                    )
+                f.write(chunk)
+    except HTTPException:
+        raise
     except Exception as e:
         tmp_pdf.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=f"上传保存失败: {e}")
@@ -174,10 +276,21 @@ def api_job_status(job_id: str) -> Dict[str, Any]:
 
 @app.post("/api/open-html")
 def api_open_html(path: str) -> Dict[str, Any]:
-    """调 OS 默认浏览器 / 文件管理器打开 HTML."""
+    """调 OS 默认浏览器 / 文件管理器打开 HTML.
+
+    安全 (H-5): path 必须落进白名单根 (inbox/archive/courseware/desktop/tmp),
+    且后缀必须是 .html — 避免任意文件被外部进程用 OS 默认 app 打开。
+    """
     p = Path(path)
     if not p.is_file():
         raise HTTPException(status_code=404, detail=f"file not found: {path}")
+    if p.suffix.lower() not in (".html", ".htm"):
+        raise HTTPException(status_code=400, detail=f"非 HTML 文件: {p.name}")
+    if not _is_path_within_allowed(p):
+        raise HTTPException(
+            status_code=403,
+            detail=f"path 不在白名单范围内: {p}",
+        )
     try:
         if platform.system() == "Darwin":
             subprocess.Popen(["open", str(p)])
@@ -241,11 +354,28 @@ def api_incomplete_uploads(within_hours: int = 24) -> Dict[str, Any]:
 
 @app.post("/api/incomplete-uploads/clear")
 def api_clear_incomplete(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """清除指定残留 PDF (banner 的 "丢弃" 按钮)."""
+    """清除指定残留 PDF (banner 的 "丢弃" 按钮).
+
+    安全 (H-3): 传入的每个 path 必须落进白名单根 (inbox/archive/courseware/desktop/tmp),
+    且后缀必须是 .pdf。避免 localhost 上其他进程利用此 endpoint 删除任意文件
+    (e.g. {"paths": ["/Users/<u>/.ssh/id_rsa"]})。
+    """
     paths = payload.get("paths", [])
     if not isinstance(paths, list):
         raise HTTPException(status_code=400, detail="paths must be list")
-    deleted = clear_incomplete_uploads(paths)
+    validated: List[Path] = []
+    for raw in paths:
+        if not isinstance(raw, str):
+            continue
+        p = Path(raw)
+        if p.suffix.lower() != ".pdf":
+            log.warning("[server] clear_incomplete 拒绝非 .pdf: %s", p)
+            continue
+        if not _is_path_within_allowed(p):
+            log.warning("[server] clear_incomplete 拒绝非白名单 path: %s", p)
+            continue
+        validated.append(p)
+    deleted = clear_incomplete_uploads([str(x) for x in validated])
     return {"deleted": deleted}
 
 

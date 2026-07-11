@@ -120,39 +120,47 @@ def render_text_blocks(blocks: List[dict], scale: float = 2.0,
 
     with sync_playwright() as p:
         browser = p.chromium.launch(**_launch_kwargs)
-        page = browser.new_page(
-            viewport={"width": 1920, "height": 1080},
-            device_scale_factor=scale,
-        )
-        page.set_content(html, wait_until="networkidle")
         try:
-            page.wait_for_function(
-                "typeof renderMathInElement !== 'undefined'",
-                timeout=10000,
+            page = browser.new_page(
+                viewport={"width": 1920, "height": 1080},
+                device_scale_factor=scale,
             )
-            page.wait_for_timeout(500)
-        except Exception:
-            pass
-
-        for i, b in enumerate(blocks):
-            bid = b.get("id", i)
+            page.set_content(html, wait_until="networkidle")
             try:
-                selector = f'[data-id="{bid}"]'
-                el = page.query_selector(selector)
-                if el:
-                    buf = el.screenshot(type="png")
-                    if buf and len(buf) > 200:
-                        results[i] = buf
-            except Exception as e:
-                print(f"    ⚠ 文本截图失败 [{i}]: {e}")
+                page.wait_for_function(
+                    "typeof renderMathInElement !== 'undefined'",
+                    timeout=10000,
+                )
+                page.wait_for_timeout(500)
+            except Exception:
+                pass
 
-        browser.close()
+            for i, b in enumerate(blocks):
+                bid = b.get("id", i)
+                try:
+                    selector = f'[data-id="{bid}"]'
+                    el = page.query_selector(selector)
+                    if el:
+                        buf = el.screenshot(type="png")
+                        if buf and len(buf) > 200:
+                            results[i] = buf
+                except Exception as e:
+                    print(f"    ⚠ 文本截图失败 [{i}]: {e}")
+        finally:
+            # 修 M-13: page.set_content 超时 / 异常路径也保证 browser 关闭
+            browser.close()
 
     return results
 
 
 def render_formulas(formulas: List[dict], scale: float = 2.0) -> List[Optional[bytes]]:
-    """渲染纯 LaTeX 公式为 PNG"""
+    """渲染纯 LaTeX 公式为 PNG
+
+    安全 (H-8): 修 XSS — 老代码直接 {latex} 拼进 HTML div, PDF 嵌入恶意
+    LaTeX (如 `\\text{<script>alert(1)</script>}`) 会被解析 → 双击 HTML 触发。
+    现在按 render_text_blocks 的标准做 & < > 转义 (LaTeX 里这些符号本就用
+    \\& / \\lt / \\gt 表达, 真实公式不会含裸字符)。
+    """
     katex_js, katex_css, _ = _read_assets()
 
     items = []
@@ -162,7 +170,14 @@ def render_formulas(formulas: List[dict], scale: float = 2.0) -> List[Optional[b
             continue
         is_display = f.get("display", False)
         cls = "formula-display" if is_display else "formula-inline"
-        items.append(f'<div class="{cls}" data-id="{i}">{latex}</div>')
+        # 与 render_text_blocks 一致: & < > 转义, 阻断 <script> XSS
+        latex_esc = (
+            latex
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+        items.append(f'<div class="{cls}" data-id="{i}">{latex_esc}</div>')
 
     if not items:
         return [None] * len(formulas)
@@ -208,27 +223,29 @@ def render_formulas(formulas: List[dict], scale: float = 2.0) -> List[Optional[b
 
     with sync_playwright() as p:
         browser = p.chromium.launch(**_launch_kwargs)
-        page = browser.new_page(
-            viewport={"width": 1920, "height": 1080},
-            device_scale_factor=scale,
-        )
-        page.set_content(html, wait_until="networkidle")
         try:
-            page.wait_for_function("typeof katex !== 'undefined'", timeout=10000)
-            page.wait_for_timeout(300)
-        except Exception:
-            pass
-
-        for i in range(len(formulas)):
+            page = browser.new_page(
+                viewport={"width": 1920, "height": 1080},
+                device_scale_factor=scale,
+            )
+            page.set_content(html, wait_until="networkidle")
             try:
-                selector = f'[data-id="{i}"]'
-                rendered = page.query_selector(f'{selector} .katex') or page.query_selector(selector)
-                if rendered:
-                    buf = rendered.screenshot(type="png")
-                    if buf and len(buf) > 200:
-                        results[i] = buf
-            except Exception as e:
-                print(f"    ⚠ 公式截图失败 [{i}]: {e}")
+                page.wait_for_function("typeof katex !== 'undefined'", timeout=10000)
+                page.wait_for_timeout(300)
+            except Exception:
+                pass
 
-        browser.close()
+            for i in range(len(formulas)):
+                try:
+                    selector = f'[data-id="{i}"]'
+                    rendered = page.query_selector(f'{selector} .katex') or page.query_selector(selector)
+                    if rendered:
+                        buf = rendered.screenshot(type="png")
+                        if buf and len(buf) > 200:
+                            results[i] = buf
+                except Exception as e:
+                    print(f"    ⚠ 公式截图失败 [{i}]: {e}")
+        finally:
+            # 修 M-13: 异常路径也保证 browser 关闭
+            browser.close()
     return results
