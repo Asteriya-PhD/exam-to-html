@@ -1,20 +1,26 @@
-"""examples/demo_via_pdf2ppt.py — 用 PDF2PPT MinerUParser (高保真) 跑物理卷演示
+"""examples/demo_via_pdf2ppt.py — PDF2PPT MinerUParser 调用示意
 
-PDF2PPT._v2_parser.MinerUParser 是 PDF2PPT 项目里针对物理卷成熟的解析器,
-精度高于 exam-to-html.backend._qnum_fallback (后者只在 MinerU SDK 不可用
-时才走, 是兜底).
+⚠️  IMPORTANT — 本脚本仅是管线 demo, 不是生产精度:
 
-本脚本:
-1. 用 fake MinerU SDK (PyMuPDF 抽 markdown) 替代真实云 API — 离线可跑
-2. 调 vendored pdf2ppt._v2_parser.MinerUParser 解析
-3. 把 ParsedExam 转 topic_garden QuestionDraft 入库
-4. 走 TopicComposer + render_exam_html 渲染
-5. 输出到 output/<stem>.html + 把题图 symlink 到同级 images/
+PDF2PPT MinerUParser 依赖 MinerU 云 API 输出**已结构化**的 markdown
+(题号 / 选项 / 公式都识别好). 没有 MinerU API 真实调用, 物理卷解析精度
+远低于生产环境. 本脚本的 `_FakeMinerU.flash_extract` 只用 PyMuPDF 抽
+纯文本 — 没有 OCR、没有公式识别、没有结构化, 所以出来的 markdown
+里公式是 unicode 字符 (𝑚 𝐸 𝑣) + 一些 \\uXXXX 占位符, KaTeX 没法渲染.
+
+要拿到 PDF2PPT 的真实质量 (q_type=choice, 选项自动识别, 公式
+转 LaTeX), 必须用真 MinerU token 调云 API:
+
+    from pdf2ppt._v2_parser import MinerUParser
+    parser = MinerUParser(token="your-mineru-token-here")
+    exam = parser.parse("physics.pdf", flash=True)  # 不传 fake
+
+或在 PyMuPDF 后自己预处理 OCR 输出 (这是 PDF2PPT 仓
+[PDF2PPT/] 老路径, 旧 vendored pdf2ppt 已停产, 不在本演示范围).
 
 用法:
-    pip install -e ../topic_garden_app
-    python examples/demo_via_pdf2ppt.py <path/to/pdf>
-    python examples/demo_via_pdf2ppt.py  # 默认 archive/inbox/ 第一个 PDF
+    PYTHONPATH=exam-to-html:exam-to-html/pdf2ppt:topic_garden_app/src \\
+    .venv/bin/python examples/demo_via_pdf2ppt.py <path/to/pdf>
 """
 from __future__ import annotations
 
