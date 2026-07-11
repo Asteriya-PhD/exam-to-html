@@ -103,7 +103,9 @@ jobs:
           pip install -e ../topic_garden_app
           # PDF2PPT v2 parser 已 vendored 进本仓顶层 pdf2ppt/ (见 README §开发)。
           # 兄弟仓 PDF2PPT 不再 install (避免空仓 clone 触发找不到 requirements.txt)。
-          pip install -e .[dev]
+          pip install -e ".[dev]"
+          # PyInstaller 需单独装 (不在 [dev] extras, 见 pyproject.toml)
+          pip install pyinstaller>=6.0
 
       - name: PyInstaller
         shell: bash
