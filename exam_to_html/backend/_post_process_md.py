@@ -453,28 +453,37 @@ def normalize_question_batch(questions) -> int:
     from topic_garden import db as tg_db
 
     updated = 0
-    for q in questions:
-        try:
-            new = normalize_question_record(
-                content_md=q.content_md or "",
-                q_type=q.q_type,
-                figure_paths=q.figure_paths,
-            )
-            # 图 JSON 化与 topic_garden.add_question_with_dedupe 保持一致
-            import json
-            fig_json = (
-                json.dumps(new["figure_paths"], ensure_ascii=False)
-                if new["figure_paths"]
-                else None
-            )
-            tg_db.Question.update(
-                content_md=new["content_md"],
-                q_type=new["q_type"],
-                figure_paths=fig_json,
-            ).where(tg_db.Question.id == q.id).execute()
-            updated += 1
-        except Exception as e:  # pragma: no cover - 写回失败不影响主流程
-            log.warning("[post_process] 题 %s 归一化失败: %s", getattr(q, "id", "?"), e)
+    # 修 L-6: 整批用 db.atomic() 事务, 中断后要么全成功要么全失败,
+    # 避免状态不一致 (部分题归一化, 部分未归一化)。
+    try:
+        with tg_db.db.atomic():
+            for q in questions:
+                try:
+                    new = normalize_question_record(
+                        content_md=q.content_md or "",
+                        q_type=q.q_type,
+                        figure_paths=q.figure_paths,
+                    )
+                    # 图 JSON 化与 topic_garden.add_question_with_dedupe 保持一致
+                    import json
+                    fig_json = (
+                        json.dumps(new["figure_paths"], ensure_ascii=False)
+                        if new["figure_paths"]
+                        else None
+                    )
+                    tg_db.Question.update(
+                        content_md=new["content_md"],
+                        q_type=new["q_type"],
+                        figure_paths=fig_json,
+                    ).where(tg_db.Question.id == q.id).execute()
+                    updated += 1
+                except Exception as e:
+                    # 单题失败让整批事务回滚, 保留 DB 原始状态一致
+                    log.warning("[post_process] 题 %s 归一化失败, 整批回滚: %s", getattr(q, "id", "?"), e)
+                    raise
+    except Exception as e:
+        log.error("[post_process] 整批归一化失败, 已回滚: %s", e)
+        return 0
     if updated:
         log.info("[post_process] 归一化 %d 题", updated)
     return updated

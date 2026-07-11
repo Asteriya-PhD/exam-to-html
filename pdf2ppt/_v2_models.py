@@ -18,6 +18,8 @@ class ContentBlock:
     text_level: int = 0   # 0=正文, 1=一级标题, 2=二级标题...
     # 公式相关
     is_inline: bool = False  # 是否为行内公式
+    # 修 L-2: 显式 column 字段替代 text_level 重载 (0=左栏, 1=右栏, -1=未设)
+    column: int = -1
 
 
 @dataclass

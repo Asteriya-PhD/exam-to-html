@@ -423,9 +423,12 @@ def _wrap_more_latex(html: str) -> str:
     ⚠️ 必须在 KaTeX auto-render 跑之前调用, 但这里返回的是 HTML 字符串,
     KaTeX 在前端 DOMContentLoaded 时跑 — 所以这是后处理, 客户端拿到时
     KaTeX 会扫到新包的 $..$ 并渲染.
+
+    修 L-7: 改 placeholder 为 UUID4 风格 (e.g. KXXX_7f3a9b2c), 碰撞概率
+    极低 (\x00 + 单字母前缀 + NUL 模式只适合早期 demo)。
     """
-    # 把 $...$ 块临时替换为 placeholder, 避免内部命令被二次包裹
-    placeholder = "\x00K{}X\x00"
+    import uuid as _uuid
+    placeholder_prefix = "KMATH_" + _uuid.uuid4().hex[:8] + "_"  # e.g. KMATH_7f3a9b2c_
     segments: list = []
     counter = {"i": 0}
 
@@ -433,7 +436,7 @@ def _wrap_more_latex(html: str) -> str:
         segments.append(m.group(0))
         idx = counter["i"]
         counter["i"] += 1
-        return placeholder.format(idx)
+        return f"{placeholder_prefix}{idx}__END"  # 唯一 sentinel, 不会撞字面
 
     # 保护 $$...$$ (display)
     html2 = re.sub(r"\$\$[\s\S]+?\$\$", _protect, html)
@@ -451,15 +454,15 @@ def _wrap_more_latex(html: str) -> str:
         return "$" + m.group(0) + "$"
 
     # 但要避免重复包 — 用占位符, 处理后再还原
-    # 上面已经清掉了 $..$, 剩下的 \cmd{...}{...} 都可以安全包
     html2 = _LATEX_CMD_RE.sub(_wrap, html2)
 
-    # 还原 $...$ 占位符
+    # 还原 $...$ 占位符 (用动态构造的 regex, 匹配本次 prefix)
+    placeholder_re = re.escape(placeholder_prefix) + r"(\d+)__END"
     def _restore(m: "re.Match[str]") -> str:
         idx = int(m.group(1))
         return segments[idx]
 
-    html2 = re.sub(placeholder.format(r"(\d+)"), _restore, html2)
+    html2 = re.sub(placeholder_re, _restore, html2)
     return html2
 
 

@@ -262,6 +262,10 @@ def _iter_pages_text(pdf_path: str) -> List[Tuple[int, str]]:
     out: List[Tuple[int, str]] = []
     try:
         doc = fitz.open(pdf_path)
+        # PyMuPDF 1.28+ 损坏 PDF 返回 None 而非抛异常
+        if doc is None:
+            log.warning("[qnum_fallback] fitz.open 返回 None, 跳过")
+            return []
         try:
             for pn in range(len(doc)):
                 page_text = doc[pn].get_text("text") or ""

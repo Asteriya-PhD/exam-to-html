@@ -14,12 +14,17 @@ KATEX_DIR = Path(__file__).parent / "katex"
 
 
 def _read_assets() -> tuple:
+    """读 vendored KaTeX 资源.
+
+    修 L-8: 用 utf-8-sig 自动剥 BOM, 避免 KaTeX JS 含 BOM 字符时浏览器拒绝解析
+    (极低概率, 但零成本修复)。
+    """
     js_path = KATEX_DIR / "katex.min.js"
     css_path = KATEX_DIR / "katex.min.css"
     auto_render_path = KATEX_DIR / "auto-render.min.js"
-    js = js_path.read_text(encoding="utf-8")
-    css = css_path.read_text(encoding="utf-8")
-    auto_render_js = auto_render_path.read_text(encoding="utf-8")
+    js = js_path.read_text(encoding="utf-8-sig")
+    css = css_path.read_text(encoding="utf-8-sig")
+    auto_render_js = auto_render_path.read_text(encoding="utf-8-sig")
     # 内联字体
     import base64
     fonts_dir = KATEX_DIR / "fonts"

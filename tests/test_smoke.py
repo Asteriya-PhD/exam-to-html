@@ -37,9 +37,17 @@ def _topic_garden_models_importable():
 
 
 def _pdf2ppt_importable():
+    """判断 pdf2ppt 能否跑真 PDF E2E.
+
+    需要 PyMuPDF (fitz) + MinerU SDK (mineru-open-sdk) 都装好且 MinerU SDK
+    能成功 import。MinerUParser 顶层不 import fitz / mineru (运行时按需 import),
+    所以单 import MinerUParser 不足以判断 — 显式 try fitz + mineru,
+    缺则视为不可跑。
+    """
     try:
         from pdf2ppt._v2_parser import MinerUParser  # noqa: F401
-
+        import fitz  # noqa: F401 — PyMuPDF, 真 PDF 解析必需
+        from mineru import MinerU  # noqa: F401 — MinerU SDK flash_extract 入口
         return True
     except Exception:
         return False

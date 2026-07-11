@@ -56,12 +56,36 @@ def load() -> Dict[str, Any]:
     return merged
 
 
+def _validate_value(key: str, value: Any) -> Any:
+    """修 L-5: 对入参做类型 + 取值校验, 拒绝垃圾值 (e.g. mode=123, output_dir=123).
+
+    返回规范化后的值;非法 → 返回 DEFAULTS[key] (兜底, 不抛异常, 让前端不感知)。
+    """
+    if key == "mineru_token":
+        # 仅 str 或 None; 数字/列表/字典 → None
+        return str(value) if isinstance(value, str) else None
+    if key == "output_dir":
+        # 仅 str (含经 strip 后的非空) 或 None; 非字符串 → None
+        if isinstance(value, str):
+            s = value.strip()
+            return s if s else None
+        return None
+    if key == "last_check_ts":
+        return str(value) if isinstance(value, str) else None
+    if key == "mode":
+        return value if value in ("auto", "flash", "precision") else "auto"
+    return value
+
+
 def save(cfg: Dict[str, Any]) -> None:
     """原子写 config.json. 先写 .tmp, 再 os.replace."""
     ensure_data_dirs()
     p = config_path()
-    # 只持久化已知字段
-    payload = {k: cfg.get(k, DEFAULTS[k]) for k in DEFAULTS}
+    # 修 L-5: 校验每个字段, 拒绝垃圾值 (e.g. {"mode": 123} / {"output_dir": 123})
+    payload = {
+        k: _validate_value(k, cfg.get(k, DEFAULTS[k]))
+        for k in DEFAULTS
+    }
 
     # 原子写: 同目录下 .tmp → os.replace
     fd, tmp_path = tempfile.mkstemp(

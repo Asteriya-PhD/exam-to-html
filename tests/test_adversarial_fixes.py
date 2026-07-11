@@ -444,3 +444,171 @@ class TestCleanOcrNoisePreservesPhysics:
         # 8+ 连续 0 (OCR 噪声): 应清理
         result = _clean_ocr_noise("速度 00000000000 O0 高")
         assert "00000000000" not in result
+
+
+# ============================================================
+# L-2: ContentBlock.column 替代 text_level 重载
+# ============================================================
+class TestColumnField:
+    """L-2: image block 应有显式 column 字段, 不再滥用 text_level"""
+
+    def test_content_block_has_column_field(self):
+        from pdf2ppt._v2_models import ContentBlock
+        b = ContentBlock(block_type="image", content="x", column=1)
+        assert b.column == 1
+
+    def test_image_block_uses_column_not_text_level(self):
+        """_extract_images_from_pdf 注册图片用 column 字段"""
+        from pdf2ppt import _v2_parser
+        src = Path(_v2_parser.__file__).read_text(encoding="utf-8")
+        # 在 _extract_images_from_pdf 函数体内搜索 column= 赋值
+        m = re.search(
+            r"def _extract_images_from_pdf\(self.*?(?=\n    def |\Z)",
+            src,
+            re.DOTALL,
+        )
+        assert m, "_extract_images_from_pdf 未找到"
+        body = m.group(0)
+        # 不再用 text_level= 暂存栏位
+        assert "text_level=1 if is_right_column" not in body, (
+            "L-2 未修: 仍用 text_level 重载"
+        )
+        assert "column=1 if is_right_column else 0" in body, (
+            "L-2 未修: 缺 column 字段赋值"
+        )
+
+    def test_text_level_no_longer_overloaded(self):
+        """ContentBlock.text_level 文档仍是 0=正文 / 1=一级标题, 不再被滥用"""
+        from pdf2ppt._v2_models import ContentBlock
+        b = ContentBlock(block_type="text", content="hello", text_level=1)
+        assert b.text_level == 1
+        # column 默认 -1 (未设)
+        assert b.column == -1
+
+
+# ============================================================
+# L-3 (重复 L-3 已覆盖): placeholder 唯一化
+# ============================================================
+class TestPlaceholderUniqueness:
+    """L-7: _wrap_more_latex placeholder 必须用 UUID, 不会撞字面"""
+
+    def test_placeholder_not_nul_pattern(self):
+        """不应再用 \\x00K{}X\\x00 模式"""
+        from exam_to_html.backend import exam_renderer
+        src = Path(exam_renderer.__file__).read_text(encoding="utf-8")
+        assert "\\x00K{}X\\x00" not in src, "L-7 未修: 仍用 \\x00K{}X\\x00"
+
+    def test_placeholder_uses_uuid(self):
+        """placeholder 前缀用 UUID4"""
+        from exam_to_html.backend.exam_renderer import _wrap_more_latex
+        html = "公式 $\\frac{1}{2}$ 与 $\\frac{1}{3}$ 同框"
+        result = _wrap_more_latex(html)
+        # placeholder 模式: KMATH_xxxxxxxx_数字__END
+        # 不应出现 \x00 NUL 字符
+        assert "\x00" not in result
+        # 公式应原样保留
+        assert "$\\frac{1}{2}$" in result
+        assert "$\\frac{1}{3}$" in result
+
+    def test_wrap_does_not_break_existing_latex(self):
+        """原有 $...$ 公式不应被破坏"""
+        from exam_to_html.backend.exam_renderer import _wrap_more_latex
+        html = "$a^2 + b^2 = c^2$ 是勾股定理"
+        result = _wrap_more_latex(html)
+        assert "$a^2 + b^2 = c^2$" in result, f"L-7 回归: 公式被破坏 → {result!r}"
+
+
+# ============================================================
+# L-5: api_post_config 校验
+# ============================================================
+class TestConfigValidation:
+    """L-5: config.save 应拒绝垃圾值"""
+
+    def test_invalid_mode_rejected(self, tmp_path, monkeypatch):
+        """mode=123 应被规范成 'auto' (兜底)"""
+        from exam_to_html import config
+        # 用 monkeypatch 重定向 data_dir
+        monkeypatch.setattr(config, "data_dir", lambda: tmp_path)
+        cfg = {"mode": 123, "output_dir": 456, "mineru_token": None}
+        config.save(cfg)
+        loaded = config.load()
+        assert loaded["mode"] == "auto"
+        assert loaded["output_dir"] is None  # 数字 → None
+        assert loaded["mineru_token"] is None
+
+    def test_valid_mode_passes(self, tmp_path, monkeypatch):
+        from exam_to_html import config
+        monkeypatch.setattr(config, "data_dir", lambda: tmp_path)
+        cfg = {"mode": "precision", "output_dir": "/tmp/foo", "mineru_token": "abc"}
+        config.save(cfg)
+        loaded = config.load()
+        assert loaded["mode"] == "precision"
+        assert loaded["output_dir"] == "/tmp/foo"
+        assert loaded["mineru_token"] == "abc"
+
+
+# ============================================================
+# L-8: _read_assets 用 utf-8-sig
+# ============================================================
+class TestBOMStrippedReadAssets:
+    """L-8: _read_assets 用 utf-8-sig 自动剥 BOM"""
+
+    def test_read_assets_uses_utf8_sig(self):
+        from pdf2ppt import _katex_renderer
+        src = Path(_katex_renderer.__file__).read_text(encoding="utf-8")
+        # 在 _read_assets 函数体内搜索 read_text 调用
+        m = re.search(
+            r"def _read_assets\(\) -> tuple:.*?(?=\ndef |\nclass |\Z)",
+            src,
+            re.DOTALL,
+        )
+        assert m, "_read_assets 未找到"
+        body = m.group(0)
+        assert "encoding=\"utf-8-sig\"" in body, "L-8 未修: 仍用 utf-8"
+
+
+# ============================================================
+# L-9: equation block 不再丢
+# ============================================================
+class TestPreQuestionEquation:
+    """L-9: 题号前的 equation 应挂到第一题"""
+
+    def test_pre_question_equation_attached_to_first_q(self):
+        """_split_into_questions: equation before q1 应挂在 q1"""
+        from pdf2ppt._v2_parser import MinerUParser
+        from pdf2ppt._v2_models import ContentBlock
+
+        parser = MinerUParser.__new__(MinerUParser)
+        parser._debug_mode = False
+        blocks = [
+            ContentBlock(block_type="equation", content="E=mc^2"),
+            ContentBlock(block_type="text", content="1. 求 E"),
+        ]
+        questions = parser._split_into_questions(blocks)
+        assert len(questions) == 1
+        # equation 应在 q1.blocks
+        eq_blocks = [b for b in questions[0].blocks if b.block_type == "equation"]
+        assert len(eq_blocks) == 1
+        assert eq_blocks[0].content == "E=mc^2"
+
+    def test_source_uses_pre_question_equations(self):
+        """源码必须含 pre_question_equations 列表"""
+        from pdf2ppt import _v2_parser
+        src = Path(_v2_parser.__file__).read_text(encoding="utf-8")
+        assert "pre_question_equations" in src, "L-9 未修: 缺暂存 list"
+
+
+# ============================================================
+# L-10: PAGE_MARKER fullmatch
+# ============================================================
+class TestPageMarkerStrict:
+    """L-10: PAGE_MARKER 必须严格整行匹配, 不误吃纯文本"""
+
+    def test_uses_re_fullmatch(self):
+        """源码必须含 re.fullmatch (替代 re.match ^...$)"""
+        from pdf2ppt import _v2_parser
+        src = Path(_v2_parser.__file__).read_text(encoding="utf-8")
+        # 在 _parse_markdown 函数体内搜索
+        assert "re.fullmatch(r'P" in src or 're.fullmatch(r"P' in src, (
+            "L-10 未修: 仍用 PAGE_MARKER_PATTERN.match"
+        )

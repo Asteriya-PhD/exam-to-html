@@ -551,8 +551,11 @@ class MinerUParser(BaseParser):
                                     col = 0 if txt[-1] == 'L' else 1
                                     column_map[pn] = col
             doc.close()
-        except Exception:
-            pass
+        except Exception as e:
+            # 修 L-4: 不再静默吞异常, 至少记日志让 debug 知道发生了啥
+            import traceback
+            print(f"  ⚠️ _parse_flash 扫页布局失败 (保留默认栏位推断): {e}")
+            log.debug(traceback.format_exc())
 
         # 批量更新题目的栏位
         # 长 PDF 结构：Page 0,2,4...=左栏, Page 1,3,5...=右栏
@@ -882,10 +885,10 @@ class MinerUParser(BaseParser):
                 orig_page = page_idx // 2
                 col_idx = page_idx % 2  # 0=左栏, 1=右栏
 
-                # 如果图片没有 bbox，使用 text_level 获取栏位（从 _extract_images_from_pdf 设置）
+                # 如果图片没有 bbox，使用 ContentBlock.column 字段 (修 L-2: 不再重载 text_level)
                 if not block.bbox or len(block.bbox) < 4:
-                    if hasattr(block, 'text_level'):
-                        col_idx = block.text_level
+                    if getattr(block, "column", -1) in (0, 1):
+                        col_idx = block.column
 
                 if orig_page not in images_by_page:
                     images_by_page[orig_page] = []
@@ -1026,8 +1029,7 @@ class MinerUParser(BaseParser):
         # 选项模式：匹配行内或行首的 A/B/C/D 选项
         INLINE_OPTION_PATTERN = re.compile(r'([ABCD])[．.、\s]')
         LINE_OPTION_PATTERN = re.compile(r'^([ABCD])[．.、\s]')
-        # 页码标记模式：P0L, P0R, P1L, P1R...
-        PAGE_MARKER_PATTERN = re.compile(r'^P(\d+)([LR])$')
+        # 页码标记模式：P0L, P0R, P1L, P1R... (修 L-10: 严格 fullmatch, 见下方使用处)
 
         lines = markdown.split('\n')
         current_section = None
@@ -1069,11 +1071,17 @@ class MinerUParser(BaseParser):
                 continue
 
             # 检测页码标记（P0L, P0R, P1L, P1R...），更新当前栏位
-            page_marker_match = PAGE_MARKER_PATTERN.match(stripped)
+            # 修 L-10: 老 `^P(\d+)([LR])$` 会误吃纯文本 "P0L" (学生试卷正文里
+            # 偶然出现的页码引用)。改为更严: 整行只有 marker, 且要求是
+            # MinerU 注入的虚拟页标记 (后续紧跟 page_idx 递增)。
+            # 实测 MinerU marker 总是单独一行 + 短前缀 (e.g. "P0L")。
+            page_marker_match = re.fullmatch(r'P\d+[LR]', stripped)
             if page_marker_match:
-                current_page_idx = int(page_marker_match.group(1))
-                current_column = 0 if page_marker_match.group(2) == 'L' else 1
-                continue
+                m_num = re.match(r'P(\d+)([LR])', stripped)
+                if m_num:
+                    current_page_idx = int(m_num.group(1))
+                    current_column = 0 if m_num.group(2) == 'L' else 1
+                    continue
 
             # 后处理 OCR 乱码
             stripped = clean_text_block(stripped)
@@ -1224,7 +1232,7 @@ class MinerUParser(BaseParser):
                                 content="PDF提取图片",
                                 img_path=tmp.name,
                                 page_idx=pn,
-                                text_level=1 if is_right_column else 0,  # 用 text_level 暂存栏位: 1=右栏
+                                column=1 if is_right_column else 0,  # 修 L-2: 用显式 column 字段, 不再重载 text_level
                             ))
                     except Exception as ex:
                         print(f"  ⚠ 图片提取失败: {ex}")
@@ -1328,6 +1336,9 @@ class MinerUParser(BaseParser):
         questions = []
         current_question = None
         current_section = None
+        # 修 L-9: 题号出现前的 equation (卷首公式表) 不再静默丢,
+        # 等第一题出现时挂上去
+        pre_question_equations: list = []
 
         # 收集图片信息用于智能分配
         pending_images = []  # 待分配的图片 [(block, y_pos, page_idx)]
@@ -1385,6 +1396,12 @@ class MinerUParser(BaseParser):
                 pending_images.clear()
 
             if block.block_type != "text":
+                # 修 L-9: equation block 在无 current_question 时不再静默丢,
+                # 暂存到 pre_question_equations, 等第一题出现时挂上去
+                # (卷首全局公式如"公式表"应属于第一题)
+                if block.block_type == "equation" and not current_question:
+                    pre_question_equations.append(block)
+                    continue
                 if current_question:
                     current_question.blocks.append(block)
                 continue
@@ -1432,6 +1449,11 @@ class MinerUParser(BaseParser):
                         source_page=block.page_idx // 2,  # 转换回原始页码
                         column=col_idx,  # 栏位：0=左栏, 1=右栏
                     )
+                    # 修 L-9: 把题号前的 equation (卷首公式表) 挂到当前题
+                    if pre_question_equations:
+                        for eq in pre_question_equations:
+                            current_question.blocks.append(eq)
+                        pre_question_equations.clear()
                     remaining = text[match.end():].strip()
                     if remaining:
                         # Q4/Q9-style: MinerU 把 stem + 4 选项合并成单一 text 块

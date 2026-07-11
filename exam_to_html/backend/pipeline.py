@@ -125,6 +125,11 @@ def _check_pdf_encrypted(pdf_path: Path) -> None:
         return
     try:
         doc = fitz.open(str(pdf_path))
+        # PyMuPDF 1.28+ 在损坏 PDF 上偶尔返回 None 而非抛 RuntimeError,
+        # 必须显式判 None, 否则 finally doc.close() 报 NoneType.close
+        if doc is None:
+            log.warning("[pipeline] fitz.open 返回 None (损坏 PDF?), 跳过加密检查")
+            return
         try:
             if doc.is_encrypted:
                 raise EncryptedPdfError(f"PDF 已加密: {pdf_path.name}")
