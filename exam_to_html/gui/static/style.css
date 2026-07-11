@@ -630,3 +630,16 @@ details summary:hover { color: var(--color-ink); }
   .right { grid-template-rows: auto auto; }
   .preview-body { grid-template-columns: 1fr; }
 }
+
+
+/* ----- 试卷讲评 — 选项列表 (A./B./C./D. 自动编号) ----- */
+ol.options {
+  list-style-type: upper-alpha;
+  padding-left: 1.6em;
+  margin: 0.5em 0 1em;
+}
+ol.options li {
+  margin: 0.3em 0;
+  padding-left: 0.3em;
+  line-height: 1.6;
+}

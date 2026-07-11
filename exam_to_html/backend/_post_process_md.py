@@ -288,8 +288,18 @@ def detect_q_type(content_md: str, current: Optional[str] = None) -> str:
     text = content_md.strip()
     # 1) 选择题判定: 行首 A/B/C/D 选项 ≥ 2 个,且每项长度合理 (避免 ABCD 全拼误判)
     opt_lines = [l for l in text.splitlines() if _OPTION_LINE_RE.match(l)]
+    # 修 q02 fill_blank 误判: OCR 选项可能跨行 (C/D 行只有字母, 内容在下一行),
+    # 放宽到 ≥2 行即视为选择题 (A + B 模式: A1 + BCD 完整; 或纯 ABCD 拆行)
     if len(opt_lines) >= 2 and _looks_like_real_options(opt_lines):
         return "choice"
+    # 1.5) 兜底选择题判定: 题面含 "(    )" 填空括号 + 至少 2 个 A-D 标签 (跨行也算)
+    if re.search(r"[（(]\s*[)）]", text):
+        abcd_count = sum(
+            1 for l in text.splitlines()
+            if re.match(r"^\s*[（(]?[ABCD][)）]?\s*[.．、]?\s*$", l.strip())
+        )
+        if abcd_count >= 2:
+            return "choice"
     # 2) 实验题判定
     if _is_experiment_text(text):
         return "experiment"

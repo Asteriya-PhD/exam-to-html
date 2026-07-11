@@ -607,7 +607,7 @@ class TestQnumFallbackPipelineHook:
         )
         monkeypatch.setattr(
             "exam_to_html.backend._qnum_fallback._build_drafts_from_pages",
-            lambda pages: fake_drafts,
+            lambda pages, pdf_path=None: fake_drafts,
         )
 
         pdf = tmp_path / f"{unique_stem}.pdf"

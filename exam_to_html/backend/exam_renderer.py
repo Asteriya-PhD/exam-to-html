@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import logging
 import re
+import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -417,6 +418,117 @@ _LATEX_CMD_RE = re.compile(
 )
 
 
+# ============================================================
+# OCR Unicode 数学符号 → LaTeX
+# ============================================================
+# PDF OCR (PyMuPDF / MinerU) 把物理公式里的数学符号转为:
+# - Mathematical Italic 小写字母 (U+1D44E..U+1D467, e.g. 𝑚=U+1D45A)
+# - Mathematical Italic 大写字母 (U+1D434..U+1D44D, e.g. 𝐸=U+1D438)
+# - Greek 数学符号 (U+1D6FC..U+1D755, e.g. 𝜃=U+1D703)
+# - 数字/字母上标 (e.g. 𝑣² 但更常见是 𝑣! / 𝑣# = 𝑣₀ / 𝑣₁)
+# - 单位上标 (e.g. m/s² 拆成 m/s% / m/s')
+# 这些字符 KaTeX 不识别 — 必须先转 LaTeX (\mathit{m}, m_0, m^2, etc.)
+#
+# 注意: 必须在 _wrap_more_latex 之前, 否则 `𝑚` 不会被识别为 math 字符.
+# 也必须在 _normalize_whitespace 之前, 否则连续空白合并会丢"上标"信息.
+
+# Mathematical Italic 字母 → \mathit{<ascii>}
+_MATH_ITALIC_MAP = {
+    # 小写字母
+    **{chr(c): chr(ord('a') + (c - 0x1D44E)) for c in range(0x1D44E, 0x1D44E + 26)},
+    # 大写字母
+    **{chr(c): chr(ord('A') + (c - 0x1D434)) for c in range(0x1D434, 0x1D434 + 26)},
+    # Greek 小写 (α β γ ... 𝜔) — 0x1D6FC..0x1D71B
+    **{chr(c): chr(0x03B1 + (c - 0x1D6FC)) for c in range(0x1D6FC, 0x1D6FC + 18)},
+    # Greek 大写 (Α Β Γ ... Ω) — 0x1D6A8..0x1D6C1 + 𝛁 𝛂 𝛃 (already covered above)
+    **{chr(c): chr(0x0391 + (c - 0x1D6A8)) for c in range(0x1D6A8, 0x1D6A8 + 18)},
+    # Digit 0-9 (𝟎..𝟗) — 0x1D7D8..0x1D7E1
+    **{chr(c): str(c - 0x1D7D8) for c in range(0x1D7D8, 0x1D7D8 + 10)},
+}
+
+# OCR 上下标映射 — PyMuPDF 拆公式时常用 ASCII 字符当下标:
+# ! → ₀ (exclaim), # → ₁ (# in keyboard shift), $ → ₂
+# % → ₃, & → ₄, ' → ₅, ( → ₆, ) → ₇
+# * → ₈, + → ₉ (常见于 m/s²)
+_OCR_SUB_MAP = {
+    '!': '0', '#': '1', '$': '2', '%': '3', '&': '4',
+    "'": '5', '(': '6', ')': '7', '*': '8', '+': '9',
+    ',': 'a', '-': 'b', '.': 'c', '/': 'd',
+}
+
+
+def _ocr_unicode_to_latex(text: str) -> str:
+    r"""OCR 出的 Unicode 数学符号 → LaTeX.
+
+    转换:
+    - Mathematical Italic 字母 / 希腊字母 / 数字 → \mathit{<ascii>}
+      (例: '𝑚' → '\\mathit{m}', '𝐸' → '\\mathit{E}', '𝜃' → '\\theta')
+    - OCR 上/下标符号 (!, #, $, ...) → _{<digit>} 或 ^{<digit>}
+      规则: 跟在 LaTeX 字母后 → 下标; 跟在数字后 → 上标 (10 的幂)
+    - '-' 和 '·' 紧跟数字 → 负号 / 乘号 (\cdot)
+    - 后续 _wrap_more_latex 会把 \mathit{} / \theta 包成 $...$ 让 KaTeX 渲染
+
+    边界: 跳过已在 $...$ 内的内容 (避免破坏用户已写的 LaTeX).
+    """
+    # 保护已有 $...$ 块 — 用 placeholder (后期还原)
+    placeholder_prefix = f"KOCR_{uuid.uuid4().hex[:8]}_"
+    placeholders: List[str] = []
+    def _protect(m: "re.Match[str]") -> str:
+        placeholders.append(m.group(0))
+        idx = len(placeholders) - 1
+        return f"{placeholder_prefix}{idx}__END"
+    out = re.sub(r"\$[^$\n]+?\$", _protect, text)
+
+    # 1) Mathematical Italic / Greek / Digit 字符 → \mathit{<ascii>}
+    # 不能用 str.maketrans (会把 ASCII 字符也覆盖). 用正则逐字符转.
+    def _replace_math_italic(m: "re.Match[str]") -> str:
+        c = m.group(0)
+        return "\\mathit{" + _MATH_ITALIC_MAP[c] + "}"
+    # 匹配所有 mathematical 字符 + 数字字符
+    pattern = "[" + "".join(_MATH_ITALIC_MAP.keys()) + "]"
+    out = re.sub(pattern, _replace_math_italic, out)
+
+    # 2) OCR 上下标转换 — 严守边界: 只在 \mathit{X} 或单词字母后跟 [!"#$%&'()*+]
+    # 规则:
+    #   a) \mathit{X} 后跟 1-2 个标点 → 下标 (m_0)
+    #   b) 单数字 + 1 个标点 → 上标 (10³ → 10^3)
+    # c) 单词边界外不转 (避免 A. 选项标签里的 . 被误转)
+    # 简化: 仅处理以下两种模式
+    # 模式 a: \mathit{<letter>}([!\"#$%&'()*+]+)
+    out = re.sub(
+        r"\\mathit\{([a-zA-Z])\}([!\#$%&'()*+,./\-]{1,3})",
+        lambda m: "\\mathit{" + m.group(1) + "}_" + _OCR_SUB_MAP.get(m.group(2)[0], m.group(2)[0]),
+        out,
+    )
+    # 模式 b: <digit>([!\"#$%&'()*+]+)
+    out = re.sub(
+        r"(\d)([!\#$%&'()*+]{1,2})",
+        lambda m: m.group(1) + "^" + _OCR_SUB_MAP.get(m.group(2)[0], m.group(2)[0]),
+        out,
+    )
+
+    # 3) 跨行分子分母 — 把相邻两行 \mathit{X} 视为分子/分母
+    # 例: '\mathit{m}\n\mathit{M}' → '\frac{m}{M}'
+    # 注意: \mathit{X} 内部已有 {X}, \frac{}{} 要直接接 m/M 不带 \mathit{}
+    def _fraction_across_lines(m: "re.Match[str]") -> str:
+        num_inner = m.group(1)[len(r"\mathit{"):-1]  # 去掉 \mathit{
+        den_inner = m.group(2)[len(r"\mathit{"):-1]
+        return f"\\frac{{{num_inner}}}{{{den_inner}}}"
+    out = re.sub(
+        r"(\\mathit\{[a-zA-Z]\})([\n ]+)(\\mathit\{[a-zA-Z]\})",
+        _fraction_across_lines,
+        out,
+    )
+
+    # 还原 $...$ 占位符
+    placeholder_re = re.escape(placeholder_prefix) + r"(\d+)__END"
+    def _restore(m: "re.Match[str]") -> str:
+        idx = int(m.group(1))
+        return placeholders[idx]
+    out = re.sub(placeholder_re, _restore, out)
+    return out
+
+
 def _wrap_more_latex(html: str) -> str:
     """把裸 LaTeX 命令 (没在 $..$ 内的) 包成 $..$ 让 KaTeX 渲染.
 
@@ -510,8 +622,54 @@ def render_exam_html(
     if not questions_by_k:
         # v0.19+: topic_questions_list 是一维列表 (不再分 K 桶)
         flat = topic.get("topic_questions_list") or []
+        if not flat:
+            # topic_garden v0.19 没暴露 topic_questions_list 时, exam-to-html 自己拉
+            # 全部挂载题并按 source_qnum 排序 — 绕过 composer._bucket_questions_by_k
+            # 的 K1-K5 轮询填桶 (会破坏题号顺序, q1→q6→q11→q2→q7→q12...)
+            try:
+                from topic_garden.db import TopicQuestion, Question
+                tqs = list(
+                    TopicQuestion.select().where(TopicQuestion.topic == topic.get("id"))
+                )
+                tqs.sort(key=lambda tq: tq.question.source_qnum or "")
+                flat = []
+                for tq in tqs:
+                    q = Question.get_by_id(tq.question_id)
+                    flat.append({
+                        "id": q.id,
+                        "content_md": q.content_md or "",
+                        "source_qnum": q.source_qnum or "",
+                        "q_type": q.q_type or "unknown",
+                        "is_multi_select": getattr(q, "is_multi_select", None),
+                        "figure_paths": [],
+                        "figure_paths_extra": [],
+                        "figure_paths_count": 0,
+                        "_raw_md": q.content_md or "",
+                        "_role": tq.role,
+                        "_priority": tq.priority,
+                    })
+            except Exception as e:
+                log.warning("[exam_renderer] 拉题 fallback 失败: %s", e)
+                flat = []
         if flat:
             questions_by_k = {"_all": flat}
+    elif (
+        set(questions_by_k.keys()) == {"K1", "K2", "K3", "K4", "K5"}
+        and total_questions > 0
+    ):
+        # topic_garden v0.19 仍返回 K1-K5 分桶 — 但对**试卷讲评** (用户期望按题号顺序)
+        # 来说, K 桶轮询填桶破坏了 1→15 顺序。检测到试卷场景 (所有题同 role + 题数
+        # 与 expected_layout 总数一致) 时, 强制扁平化 + 按 source_qnum 排序。
+        all_qs = []
+        for k in ("K1", "K2", "K3", "K4", "K5"):
+            all_qs.extend(questions_by_k.get(k, []))
+        if len(all_qs) == total_questions:
+            all_qs.sort(key=lambda q: q.get("source_qnum") or "")
+            questions_by_k = {"_all": all_qs}
+            log.info(
+                "[exam_renderer] 试卷讲评场景: 扁平化 K1-K5 桶 (按 source_qnum 排序), 共 %d 题",
+                total_questions,
+            )
 
     final_title = title or topic.get("title") or "试卷讲评"
 
@@ -525,9 +683,13 @@ def render_exam_html(
         stats=compose_result.get("stats") or {},
     )
 
-    # 后处理: 把更多 LaTeX 命令包成 $..$ 让 KaTeX 渲染 (md_to_html.py 只处理 \frac)
+    # 后处理链 (顺序重要):
+    # 1) OCR Unicode 数学符号 → LaTeX (\mathit{m}, \theta, m_0, etc.)
+    #    必须在 _wrap_more_latex 之前 — 否则 `𝑚` 字符不会被识别为 math.
+    body = _ocr_unicode_to_latex(body)
+    # 2) 把更多 LaTeX 命令包成 $..$ 让 KaTeX 渲染 (md_to_html.py 只处理 \frac)
     body = _wrap_more_latex(body)
-    # 归一化多空格
+    # 3) 归一化多空格
     body = _normalize_whitespace(body)
 
     katex_block = _load_katex_assets()
