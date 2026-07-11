@@ -1,26 +1,13 @@
-"""examples/demo_via_pdf2ppt.py — PDF2PPT MinerUParser 调用示意
+"""examples/demo_via_pdf2ppt.py — PDF2PPT MinerUParser + 真 MinerU 云 API
 
-⚠️  IMPORTANT — 本脚本仅是管线 demo, 不是生产精度:
-
-PDF2PPT MinerUParser 依赖 MinerU 云 API 输出**已结构化**的 markdown
-(题号 / 选项 / 公式都识别好). 没有 MinerU API 真实调用, 物理卷解析精度
-远低于生产环境. 本脚本的 `_FakeMinerU.flash_extract` 只用 PyMuPDF 抽
-纯文本 — 没有 OCR、没有公式识别、没有结构化, 所以出来的 markdown
-里公式是 unicode 字符 (𝑚 𝐸 𝑣) + 一些 \\uXXXX 占位符, KaTeX 没法渲染.
-
-要拿到 PDF2PPT 的真实质量 (q_type=choice, 选项自动识别, 公式
-转 LaTeX), 必须用真 MinerU token 调云 API:
-
-    from pdf2ppt._v2_parser import MinerUParser
-    parser = MinerUParser(token="your-mineru-token-here")
-    exam = parser.parse("physics.pdf", flash=True)  # 不传 fake
-
-或在 PyMuPDF 后自己预处理 OCR 输出 (这是 PDF2PPT 仓
-[PDF2PPT/] 老路径, 旧 vendored pdf2ppt 已停产, 不在本演示范围).
+调用真 MinerU (需 MINERU_TOKEN, 仓内 .env 已配). PDF2PPT MinerUParser
+拿到已结构化 markdown 后切题/识别选项/公式 — 物理卷标准解析路径.
 
 用法:
     PYTHONPATH=exam-to-html:exam-to-html/pdf2ppt:topic_garden_app/src \\
-    .venv/bin/python examples/demo_via_pdf2ppt.py <path/to/pdf>
+    .venv/bin/python examples/demo_via_pdf2ppt.py [pdf]
+
+也可不带参数 — 默认 topic_garden_app/archive/inbox/ 第一个 PDF.
 """
 from __future__ import annotations
 
@@ -28,87 +15,28 @@ import argparse
 import os
 import sys
 import tempfile
-import types
 from pathlib import Path
 
-# 把 vendored pdf2ppt 与 topic_garden_app 加入 path
-# 必须在所有 import 之前; 同时移除可能的旧 PDF2PPT/ 冲突目录 (sys.path 里有
-# /Users/zhewenliu/Claude/PDF2PPT/pdf2ppt 会抢先加载过期版本).
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _PDF2PPT_LOCAL = _REPO_ROOT / "pdf2ppt"
 _TGA_SRC = Path("/Users/zhewenliu/Claude/topic_garden_app/src")
 
-# 清理 path: 移除所有指向 PDF2PPT/ 兄弟仓旧版的路径 (包括 venv .pth 添加的)
-# 然后插入本地版本优先
+# 清理 sys.path (移除 .pth 自动注入的旧 PDF2PPT/), 强制本地版本优先
 sys.path[:] = [
     p for p in sys.path
     if "PDF2PPT/" not in p and "PDF2PPT\\" not in p
 ]
-# 然后插入本地路径 (本地优先)
 for p in [str(_PDF2PPT_LOCAL), str(_REPO_ROOT / "exam_to_html"), str(_TGA_SRC)]:
     if Path(p).exists() and p not in sys.path:
         sys.path.insert(0, p)
 
-
-def _install_fake_mineru():
-    """装 fake MinerU SDK — 不调网络, 用 PyMuPDF 直接抽 markdown.
-
-    PDF2PPT MinerUParser 调 MinerU.flash_extract() 拿 markdown. 真 MinerU SDK
-    是云 API (需 token). fake 实现完全兼容 MinerU 接口形状, 离线可跑.
-
-    MinerU.__init__ 实际需要 token 参数, 但默认 token=None 时 _api=None (flash-only).
-    """
-    import fitz  # noqa: F401  # ensure installed
-
-    class _FakeApiClient:
-        source = "pdf2ppt-v2"
-
-    class _FakeFlashApiClient:
-        source = "pdf2ppt-v2"
-
-    class _FakeMinerU:
-        def __init__(self, *a, **kw):
-            self._api = _FakeApiClient()
-            self._flash_api = _FakeFlashApiClient()
-
-        def set_source(self, source):
-            self._api.source = source
-            self._flash_api.source = source
-
-        def close(self):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            self.close()
-
-        def flash_extract(self, pdf_path, **kw):
-            import fitz as _fitz
-            doc = _fitz.open(pdf_path)
-            pages = [doc[pn].get_text("text") for pn in range(len(doc))]
-            doc.close()
-            return types.SimpleNamespace(
-                state="done",
-                markdown="\n\n".join(pages),
-                images=[],
-                content_list=[],
-            )
-
-        def extract(self, pdf_path, **kw):
-            return self.flash_extract(pdf_path, **kw)
-
-    if "mineru" not in sys.modules:
-        m = types.ModuleType("mineru")
-        m.MinerU = _FakeMinerU
-        sys.modules["mineru"] = m
-    if "mineru_open_sdk" not in sys.modules:
-        sys.modules["mineru_open_sdk"] = types.ModuleType("mineru_open_sdk")
+# 同样清掉 sys.modules 缓存
+for k in list(sys.modules.keys()):
+    if k == "pdf2ppt" or k.startswith("pdf2ppt."):
+        del sys.modules[k]
 
 
 def _ensure_peewee_topic_garden():
-    """确保 topic_garden 依赖 (peewee, jinja2) 在 path 里."""
     try:
         import peewee  # noqa: F401
         import jinja2  # noqa: F401
@@ -119,8 +47,19 @@ def _ensure_peewee_topic_garden():
         sys.exit(1)
 
 
+def _load_mineru_token() -> str:
+    """从仓内 .env 或环境变量读 MinerU token."""
+    from dotenv import load_dotenv
+    load_dotenv(_REPO_ROOT / ".env")
+    token = os.environ.get("MINERU_TOKEN") or os.environ.get("mineru_token")
+    if not token:
+        print("❌ MINERU_TOKEN 未设. 在 .env 配 MINERU_TOKEN=... 或环境变量导出.")
+        sys.exit(1)
+    return token
+
+
 def _link_images(output_dir: Path, courseware_images: Path) -> None:
-    """symlink output_dir/images → topic_garden courseware/images (PDF2PPT 抽出的图)."""
+    """symlink output_dir/images → courseware/images."""
     target = output_dir / "images"
     if target.is_symlink():
         target.unlink()
@@ -129,37 +68,22 @@ def _link_images(output_dir: Path, courseware_images: Path) -> None:
         shutil.rmtree(target)
     if courseware_images.exists():
         target.symlink_to(courseware_images.resolve(), target_is_directory=True)
-    else:
-        # fake 模式: PDF2PPT 抽的图在 tmp, 复制过去
-        import shutil
-        target.mkdir()
-        for f in courseware_images.glob("*.png"):
-            shutil.copy2(f, target / f.name)
 
 
 def run(pdf_path: str, out_dir: str = "output") -> Path:
-    """完整流程: PDF → PDF2PPT MinerU → topic_garden DB → render_exam_html → 文件.
-
-    返回 HTML 文件路径.
-    """
-    _install_fake_mineru()
+    """完整流程: PDF → 真 MinerU 云 API → PDF2PPT MinerUParser → topic_garden → HTML."""
     _ensure_peewee_topic_garden()
 
     pdf = Path(pdf_path).resolve()
     if not pdf.is_file():
         raise FileNotFoundError(f"PDF not found: {pdf}")
 
-    # 用独立 DB 避免污染
     db_path = Path(tempfile.gettempdir()) / f"exam_demo_{os.getpid()}.db"
     os.environ["TOPIC_GARDEN_DB_PATH"] = str(db_path)
 
-    # 强制清掉已加载的 pdf2ppt (避免其他位置先 import 了 PDF2PPT/ 旧版)
-    for k in list(sys.modules.keys()):
-        if k == "pdf2ppt" or k.startswith("pdf2ppt."):
-            del sys.modules[k]
+    token = _load_mineru_token()
 
     from pdf2ppt._v2_parser import MinerUParser
-    from pdf2ppt._v2_models import ContentBlock
     from topic_garden import db as tg_db
     from topic_garden.db import Question, Topic, add_topic_question
     from topic_garden.composer import TopicComposer
@@ -168,13 +92,11 @@ def run(pdf_path: str, out_dir: str = "output") -> Path:
 
     tg_db.init_db()
 
-    # Step 1: PDF2PPT MinerUParser 解析
-    print(f"📄 解析 PDF: {pdf.name}")
-    parser = MinerUParser(token=None)
+    print(f"📄 解析 PDF: {pdf.name} (真 MinerU token)")
+    parser = MinerUParser(token=token)
     exam = parser.parse(str(pdf), flash=True)
     print(f"   → {len(exam.questions)} 题, {exam.page_count} 页")
 
-    # Step 2: 转 topic_garden QuestionDraft 入库
     stem = pdf.stem
     inserted = 0
     for q in exam.questions:
@@ -200,7 +122,6 @@ def run(pdf_path: str, out_dir: str = "output") -> Path:
             print(f"   skip q{q.index}: {e}")
     print(f"   → 入库 {inserted} 题")
 
-    # Step 3: Topic + compose + render
     questions = list(
         Question.select().where(Question.source_paper == stem).order_by(Question.source_qnum)
     )
@@ -218,13 +139,11 @@ def run(pdf_path: str, out_dir: str = "output") -> Path:
     composer = TopicComposer()
     cr = composer.compose(topic_id=topic.id)
 
-    # Step 4: 写 HTML
     out = Path(out_dir).resolve()
     out.mkdir(parents=True, exist_ok=True)
     html_path = out / f"{stem}.html"
     html_path.write_text(render_exam_html(cr, title=stem), encoding="utf-8")
 
-    # Step 5: symlink 图片
     _link_images(out, courseware_images_dir())
 
     print(f"✅ HTML: {html_path} ({html_path.stat().st_size:,} bytes)")
@@ -233,15 +152,13 @@ def run(pdf_path: str, out_dir: str = "output") -> Path:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="用 PDF2PPT 跑 PDF 试卷演示")
-    parser.add_argument("pdf", nargs="?", help="PDF 路径 (默认 archive/inbox/ 第一个)")
+    parser = argparse.ArgumentParser(description="用 PDF2PPT 跑 PDF 试卷演示 (真 MinerU token)")
+    parser.add_argument("pdf", nargs="?", help="PDF 路径 (默认 topic_garden_app/archive/inbox/ 第一个)")
     parser.add_argument("-o", "--out-dir", default="output", help="输出目录")
     args = parser.parse_args()
 
     pdf = args.pdf
     if not pdf:
-        # 默认 topic_garden_app/archive/inbox/ 第一个 (该目录不入 exam-to-html 仓,
-        # 教师真实卷子源; 避免 demo 默认 PDF 不存在)
         candidates = [
             Path("/Users/zhewenliu/Claude/topic_garden_app/archive/inbox"),
             _REPO_ROOT / "archive" / "inbox",
